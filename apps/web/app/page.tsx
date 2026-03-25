@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { School, Lock, Package } from 'lucide-react'
@@ -14,6 +14,23 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
 
+  // If already logged in, skip the login page
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return
+      const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).single()
+      router.replace(profile ? '/dashboard' : '/onboarding')
+    })
+  }, [router])
+
+  // After login: go to dashboard if profile exists, onboarding if not
+  const redirectAfterLogin = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).single()
+    router.push(profile ? '/dashboard' : '/onboarding')
+  }
+
   const handleSubmit = async () => {
     setError('')
     setMessage('')
@@ -24,7 +41,7 @@ export default function LoginPage() {
       if (error) {
         setError(error.message)
       } else {
-        router.push('/onboarding')
+        await redirectAfterLogin()
       }
     } else {
       const { error } = await supabase.auth.signUp({ email, password })

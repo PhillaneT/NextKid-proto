@@ -34,9 +34,9 @@ type Item = {
   id: string;
   title: string;
   category: string;
-  price: number;
+  price_cents: number;
   images: string[];
-  school_id: string | null;
+  seller_school_id: string | null;
   is_school_specific: boolean;
   size: string | null;
 };
@@ -83,8 +83,9 @@ export default function BrowsePage() {
   const fetchItems = useCallback(async () => {
     setLoading(true);
     let query = supabase
-      .from('items')
-      .select('id, title, category, price, images, school_id, is_school_specific, size')
+      .from('listings')
+      .select('id, title, category, price_cents, images, seller_school_id, is_school_specific, size')
+      .eq('status', 'ACTIVE')
       .order('created_at', { ascending: false });
 
     if (category !== 'All') query = query.eq('category', category);
@@ -94,7 +95,7 @@ export default function BrowsePage() {
       // No school saved — return nothing (user needs to add a school first)
       if (userSchools.length === 0) { setItems([]); setLoading(false); return; }
       // Show items linked to the user's schools
-      query = query.in('school_id', userSchools.map(s => s.id));
+      query = query.in('seller_school_id', userSchools.map(s => s.id));
     }
     // All Items tab — no school filter, everything is visible for maximum seller reach
 
@@ -206,7 +207,7 @@ export default function BrowsePage() {
                     {item.size && <span className="ml-auto bg-[#f4f4f4] px-1.5 py-0.5 rounded text-[10px]">Size {item.size}</span>}
                   </p>
                   <h3 className="text-sm font-medium text-[#111] line-clamp-2 leading-snug mb-2">{item.title}</h3>
-                  <p className="text-base font-bold text-[#4757bf]">R{(item.price / 100).toLocaleString()}</p>
+                  <p className="text-base font-bold text-[#4757bf]">R{(item.price_cents / 100).toLocaleString()}</p>
                 </div>
               </div>
             ))}

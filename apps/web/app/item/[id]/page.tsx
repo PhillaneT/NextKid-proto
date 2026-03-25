@@ -12,23 +12,18 @@ type Item = {
   title: string;
   category: string;
   subcategory: string | null;
-  price: number;
-  listing_type: string;
-  auction_ends_at: string | null;
-  description_part1: string | null;
-  description_part2: string | null;
-  description_part3: string | null;
-  description_part4: string | null;
-  description_part5: string | null;
+  price_cents: number;
+  description: string | null;
   images: string[];
   created_at: string;
   seller_id: string;
-  school_id: string | null;
+  seller_school_id: string | null;
   is_school_specific: boolean;
   size: string | null;
   gender: string | null;
   grade: number | null;
   condition: string | null;
+  status: string;
 };
 
 type Offer = {
@@ -92,8 +87,7 @@ export default function ItemPage() {
 
   const [editForm, setEditForm] = useState({
     title: '', category: '', subcategory: '', price: '',
-    listing_type: 'buy_now', auction_days: '3',
-    part1: '', part2: '', part3: '', part4: '', part5: '',
+    description: '',
     size: '', gender: '', grade: '', is_school_specific: false,
   });
   const [editSchoolId, setEditSchoolId] = useState<string | null>(null);
@@ -139,38 +133,33 @@ export default function ItemPage() {
   }, [editProvince]);
 
   async function fetchItem() {
-    const { data, error } = await supabase.from('items').select('*').eq('id', id).single();
+    const { data, error } = await supabase.from('listings').select('*').eq('id', id).single();
     if (error) { console.error(error); setLoading(false); return; }
     setItem(data);
     setEditForm({
       title: data.title, category: data.category, subcategory: data.subcategory || '',
-      price: String(data.price / 100),
-      listing_type: data.listing_type || 'buy_now', auction_days: '3',
-      part1: data.description_part1 || '', part2: data.description_part2 || '',
-      part3: data.description_part3 || '', part4: data.description_part4 || '',
-      part5: data.description_part5 || '',
+      price: String(data.price_cents / 100),
+      description: data.description || '',
       size: data.size || '', gender: data.gender || '',
       grade: data.grade ? String(data.grade) : '',
       is_school_specific: data.is_school_specific || false,
     });
-    setEditSchoolId(data.school_id || null);
-    if (data.school_id) {
-      supabase.from('schools').select('name').eq('id', data.school_id).single()
+    setEditSchoolId(data.seller_school_id || null);
+    if (data.seller_school_id) {
+      supabase.from('schools').select('name').eq('id', data.seller_school_id).single()
         .then(({ data: s }) => { if (s) setEditSchoolName(s.name); });
     }
     // Fetch seller stats (province + sold count) and school name for school-specific items
-    const [{ data: sellerProfile }, { count: soldCount }, { count: likes }, { data: schoolRow }] = await Promise.all([
-      supabase.from('profiles').select('province').eq('id', data.seller_id).single(),
-      supabase.from('items').select('*', { count: 'exact', head: true }).eq('seller_id', data.seller_id).eq('status', 'sold'),
-      supabase.from('likes').select('*', { count: 'exact', head: true }).eq('item_id', data.id),
-      data.school_id
-        ? supabase.from('schools').select('name').eq('id', data.school_id).single()
+    const [{ data: sellerProfile }, { count: soldCount }, { data: schoolRow }] = await Promise.all([
+      supabase.from('profiles').select('province_code').eq('id', data.seller_id).single(),
+      supabase.from('listings').select('*', { count: 'exact', head: true }).eq('seller_id', data.seller_id).eq('status', 'COMPLETED'),
+      data.seller_school_id
+        ? supabase.from('schools').select('name').eq('id', data.seller_school_id).single()
         : Promise.resolve({ data: null }),
     ]);
-    setSellerProvince(sellerProfile?.province ?? null);
+    setSellerProvince(sellerProfile?.province_code ?? null);
     setSellerSoldCount(soldCount ?? 0);
     setViewSchoolName(schoolRow?.name ?? null);
-    setLikeCount(likes ?? 0);
 
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
@@ -178,14 +167,8 @@ export default function ItemPage() {
       setCurrentUserId(user.id);
       const owner = user.id === data.seller_id;
       setIsOwner(owner);
-      const [{ data: profileData }, { data: likedRow }] = await Promise.all([
-        supabase.from('profiles').select('is_age_verified').eq('id', user.id).single(),
-        supabase.from('likes').select('id').eq('item_id', data.id).eq('user_id', user.id).maybeSingle(),
-      ]);
+      const { data: profileData } = await supabase.from('profiles').select('is_age_verified').eq('id', user.id).single();
       setIsAgeVerified(profileData?.is_age_verified || false);
-      setLiked(!!likedRow);
-      if (owner) { fetchOffers(data.id); fetchBids(data.id); }
-      else { fetchHighestBid(data.id); checkUserBid(data.id, user.id); }
     } else {
       fetchHighestBid(data.id);
     }
@@ -211,27 +194,21 @@ export default function ItemPage() {
 
   async function handleDelete() {
     setDeleting(true);
-    const { error } = await supabase.from('items').delete().eq('id', item!.id);
+    const { error } = await supabase.from('listings').delete().eq('id', item!.id);
     if (error) { alert('Error deleting: ' + error.message); setDeleting(false); }
     else router.push('/dashboard');
   }
 
   async function handleSave() {
     setSaving(true);
-    const auctionEndsAt = editForm.listing_type === 'best_bids'
-      ? new Date(Date.now() + parseInt(editForm.auction_days) * 24 * 60 * 60 * 1000).toISOString()
-      : null;
-    const { error } = await supabase.from('items').update({
+    const { error } = await supabase.from('listings').update({
       title: editForm.title, category: editForm.category, subcategory: editForm.subcategory || null,
-      price: parseInt(editForm.price) * 100 || 0,
-      listing_type: editForm.listing_type, auction_ends_at: auctionEndsAt,
-      description_part1: editForm.part1 || null, description_part2: editForm.part2 || null,
-      description_part3: editForm.part3 || null, description_part4: editForm.part4 || null,
-      description_part5: editForm.part5 || null,
+      price_cents: parseInt(editForm.price) * 100 || 0,
+      description: editForm.description || null,
       size: editForm.size || null, gender: editForm.gender || null,
       grade: editForm.grade ? parseInt(editForm.grade) : null,
       is_school_specific: editForm.is_school_specific,
-      school_id: editForm.is_school_specific ? editSchoolId : null,
+      seller_school_id: editForm.is_school_specific ? editSchoolId : null,
       images: editImageUrls,
     }).eq('id', item!.id);
     if (error) alert('Error saving: ' + error.message);
@@ -262,7 +239,7 @@ export default function ItemPage() {
     setSubmittingBid(true);
     const amount = parseInt(bidAmount) * 100;
     if (highestBid && amount <= highestBid) { alert(`Your bid must be higher than R${highestBid / 100}`); setSubmittingBid(false); return; }
-    if (amount <= item!.price) { alert(`Your bid must be higher than the starting price of R${item!.price / 100}`); setSubmittingBid(false); return; }
+    if (amount <= item!.price_cents) { alert(`Your bid must be higher than the starting price of R${item!.price_cents / 100}`); setSubmittingBid(false); return; }
     const { error } = await supabase.from('bids').insert({ item_id: item!.id, buyer_id: currentUserId, amount });
     if (!error) {
       await supabase.from('notifications').insert({
@@ -289,7 +266,7 @@ export default function ItemPage() {
     if (!currentUserId) return;
     await supabase.from('notifications').insert({
       user_id: item!.seller_id, type: 'purchase',
-      message: `Someone purchased "${item!.title}" at R${(item!.price / 100).toLocaleString()} 🎉`, item_id: item!.id,
+      message: `Someone purchased "${item!.title}" at R${(item!.price_cents / 100).toLocaleString()} 🎉`, item_id: item!.id,
     });
     alert('Purchase recorded! The seller has been notified.');
   }
@@ -307,8 +284,8 @@ export default function ItemPage() {
     }
   }
 
-  const auctionEnded = item?.auction_ends_at ? new Date(item.auction_ends_at) < new Date() : false;
-  const timeLeft = item?.auction_ends_at ? getTimeLeft(item.auction_ends_at) : null;
+  const auctionEnded = false;
+  const timeLeft = null;
 
   function getTimeLeft(endDate: string) {
     const diff = new Date(endDate).getTime() - Date.now();
@@ -336,7 +313,7 @@ export default function ItemPage() {
     </div>
   );
 
-  const descriptionParts = [item.description_part1, item.description_part2, item.description_part3, item.description_part4, item.description_part5];
+  const descriptionParts = [item.description];
 
   return (
     <div className="min-h-screen bg-white">
@@ -410,7 +387,7 @@ export default function ItemPage() {
                     <h2 className="text-xl font-bold text-[#111]">Make an Offer</h2>
                     <button onClick={() => setShowOfferModal(false)} className="text-[#979797] hover:text-[#111]"><X size={20} /></button>
                   </div>
-                  <p className="text-[#979797] text-sm mb-6">Asking price: <span className="text-[#111] font-semibold">R{(item.price / 100).toLocaleString()}</span></p>
+                  <p className="text-[#979797] text-sm mb-6">Asking price: <span className="text-[#111] font-semibold">R{(item.price_cents / 100).toLocaleString()}</span></p>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-[#111] mb-1.5">Your Offer (Rands)</label>
@@ -455,7 +432,7 @@ export default function ItemPage() {
                   <div className="bg-[#f4f4f4] rounded-2xl p-4 mb-6 space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-[#979797]">Starting price</span>
-                      <span className="text-[#111] font-medium">R{(item.price / 100).toLocaleString()}</span>
+                      <span className="text-[#111] font-medium">R{(item.price_cents / 100).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-[#979797]">Highest bid</span>
@@ -472,7 +449,7 @@ export default function ItemPage() {
                     <label className="block text-sm font-medium text-[#111] mb-1.5">Your Bid (Rands)</label>
                     <input type="number" value={bidAmount} onChange={(e) => setBidAmount(e.target.value)}
                       className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]"
-                      placeholder={`Min: R${highestBid ? (highestBid / 100) + 1 : (item.price / 100) + 1}`} />
+                      placeholder={`Min: R${highestBid ? (highestBid / 100) + 1 : (item.price_cents / 100) + 1}`} />
                   </div>
                   <button onClick={handleSubmitBid} disabled={submittingBid || !bidAmount || auctionEnded}
                     className="w-full py-3 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-medium rounded-full transition">
@@ -680,48 +657,13 @@ export default function ItemPage() {
                   <input type="number" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
                     className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]" />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#111] mb-2">Listing Type</label>
-                  <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { value: 'buy_now', label: 'Buy Now', emoji: '⚡' },
-                      { value: 'make_offer', label: 'Make Offer', emoji: '🤝' },
-                      { value: 'best_bids', label: 'Best Bids', emoji: '🏆' },
-                    ].map((type) => (
-                      <button key={type.value} type="button"
-                        onClick={() => setEditForm({ ...editForm, listing_type: type.value })}
-                        className={`p-3 rounded-xl border-2 text-center transition ${editForm.listing_type === type.value ? 'border-[#4757bf] bg-[#fff0ee]' : 'border-[#dedede] bg-[#f4f4f4] hover:border-[#4757bf]/50'}`}>
-                        <div className="text-xl mb-1">{type.emoji}</div>
-                        <div className="text-[#111] text-xs font-medium">{type.label}</div>
-                      </button>
-                    ))}
-                  </div>
-                  {editForm.listing_type === 'best_bids' && (
-                    <div className="mt-3">
-                      <label className="block text-sm font-medium text-[#111] mb-1.5">Auction Duration</label>
-                      <select value={editForm.auction_days} onChange={(e) => setEditForm({ ...editForm, auction_days: e.target.value })}
-                        className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none">
-                        <option value="1">1 day</option>
-                        <option value="3">3 days</option>
-                        <option value="7">7 days</option>
-                        <option value="14">14 days</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
               </div>
             ) : (
               <>
                 {/* Category + listing type */}
                 <div className="flex items-center gap-3 mb-4">
                   <span className="text-xs font-semibold uppercase tracking-widest text-[#979797]">{item.category}</span>
-                  <span className={`text-xs px-3 py-1 rounded-full font-medium ${
-                    item.listing_type === 'buy_now' ? 'bg-blue-50 text-blue-600' :
-                    item.listing_type === 'make_offer' ? 'bg-green-50 text-green-600' :
-                    'bg-orange-50 text-orange-600'
-                  }`}>
-                    {item.listing_type === 'buy_now' ? '⚡ Buy Now' : item.listing_type === 'make_offer' ? '🤝 Make Offer' : '🏆 Best Bids'}
-                  </span>
+                  <span className="text-xs px-3 py-1 rounded-full font-medium bg-blue-50 text-blue-600">⚡ Buy Now</span>
                 </div>
 
                 <h1 className="text-3xl font-bold text-[#111] mb-4">{item.title}</h1>
@@ -744,32 +686,9 @@ export default function ItemPage() {
                     <ShoppingBag size={13} strokeWidth={2} className="text-[#4757bf]" />
                     {sellerSoldCount === 0 ? 'New seller' : `${sellerSoldCount} sold`}
                   </span>
-                  <span className="flex items-center gap-1.5 ml-auto">
-                    <Heart size={13} strokeWidth={2} className="text-[#979797]" />
-                    {likeCount} {likeCount === 1 ? 'like' : 'likes'}
-                  </span>
                 </div>
 
-                {item.listing_type === 'best_bids' ? (
-                  <div className="bg-[#f4f4f4] rounded-2xl p-4 mb-6 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#979797]">Starting price</span>
-                      <span className="text-[#111] font-semibold">R{(item.price / 100).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[#979797]">Highest bid</span>
-                      <span className="text-[#4757bf] font-bold text-lg">{highestBid ? `R${(highestBid / 100).toLocaleString()}` : 'No bids yet'}</span>
-                    </div>
-                    {timeLeft && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-[#979797]">Time left</span>
-                        <span className={auctionEnded ? 'text-red-500' : 'text-green-600'}>{timeLeft}</span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-4xl font-bold text-[#4757bf] mb-6">R{(item.price / 100).toLocaleString()}</div>
-                )}
+                <div className="text-4xl font-bold text-[#4757bf] mb-6">R{(item.price_cents / 100).toLocaleString()}</div>
 
                 {/* Buyer actions — shown to all non-owners */}
                 {!isOwner && (
@@ -787,37 +706,10 @@ export default function ItemPage() {
                       </div>
                     )}
                     {isLoggedIn && isAgeVerified && (
-                      <>
-                        {item.listing_type === 'buy_now' && (
-                          <button onClick={handleBuyNow}
-                            className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] text-white font-semibold rounded-full transition">
-                            ⚡ Buy Now — R{(item.price / 100).toLocaleString()}
-                          </button>
-                        )}
-                        {item.listing_type === 'make_offer' && (
-                          <button onClick={() => setShowOfferModal(true)}
-                            className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] text-white font-semibold rounded-full transition">
-                            🤝 Make an Offer
-                          </button>
-                        )}
-                        {item.listing_type === 'best_bids' && (
-                          <button onClick={() => setShowBidModal(true)} disabled={auctionEnded}
-                            className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-semibold rounded-full transition">
-                            {auctionEnded ? 'Auction Ended' : userHasBid ? '🏆 Update My Bid' : '🏆 Place a Bid'}
-                          </button>
-                        )}
-                        <button
-                          onClick={toggleLike}
-                          className={`w-full py-4 border rounded-full font-medium transition flex items-center justify-center gap-2 ${
-                            liked
-                              ? 'border-[#4757bf] bg-[#eef0fb] text-[#4757bf]'
-                              : 'border-[#dedede] hover:border-[#4757bf] text-[#111]'
-                          }`}
-                        >
-                          <Heart size={16} strokeWidth={2} className={liked ? 'fill-[#4757bf]' : ''} />
-                          {liked ? 'Saved' : 'Save Listing'}
-                        </button>
-                      </>
+                      <button onClick={handleBuyNow}
+                        className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] text-white font-semibold rounded-full transition">
+                        ⚡ Buy Now — R{(item.price_cents / 100).toLocaleString()}
+                      </button>
                     )}
                   </div>
                 )}
@@ -829,12 +721,6 @@ export default function ItemPage() {
                       <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
                       Live
                     </span>
-                    {item.listing_type === 'make_offer' && offers.length > 0 && (
-                      <span className="text-sm text-[#979797]">{offers.length} offer{offers.length !== 1 ? 's' : ''} received</span>
-                    )}
-                    {item.listing_type === 'best_bids' && bids.length > 0 && (
-                      <span className="text-sm text-[#979797]">{bids.length} bid{bids.length !== 1 ? 's' : ''} placed</span>
-                    )}
                   </div>
                 )}
 
@@ -900,61 +786,6 @@ export default function ItemPage() {
           </div>
         )}
 
-        {/* Seller offers/bids panel */}
-        {isOwner && (item.listing_type === 'make_offer' || item.listing_type === 'best_bids') && (
-          <div className="mt-10 border border-[#dedede] rounded-2xl p-8">
-            <h2 className="text-lg font-bold text-[#111] mb-6">
-              {item.listing_type === 'make_offer' ? '📬 Incoming Offers' : '🏆 Bid Leaderboard'}
-            </h2>
-            {item.listing_type === 'make_offer' && (
-              offers.length === 0 ? <p className="text-[#979797]">No offers yet.</p> : (
-                <div className="space-y-3">
-                  {offers.map((offer) => (
-                    <div key={offer.id} className="bg-[#f4f4f4] rounded-2xl p-5 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="text-[#111] font-bold text-xl">R{(offer.amount / 100).toLocaleString()}</div>
-                        {offer.message && <p className="text-[#979797] text-sm mt-1">&quot;{offer.message}&quot;</p>}
-                        <div className="text-[#979797] text-xs mt-1">{new Date(offer.created_at).toLocaleDateString()}</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {offer.status === 'pending' ? (
-                          <>
-                            <button onClick={() => handleOfferAction(offer.id, 'accepted', offer.buyer_id)}
-                              className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-full text-sm transition">Accept</button>
-                            <button onClick={() => handleOfferAction(offer.id, 'declined', offer.buyer_id)}
-                              className="px-4 py-2 border border-red-300 text-red-500 hover:bg-red-50 rounded-full text-sm transition">Decline</button>
-                          </>
-                        ) : (
-                          <span className={`text-sm px-4 py-2 rounded-full font-medium ${offer.status === 'accepted' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
-                            {offer.status === 'accepted' ? '✓ Accepted' : '✗ Declined'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
-            )}
-            {item.listing_type === 'best_bids' && (
-              bids.length === 0 ? <p className="text-[#979797]">No bids yet.</p> : (
-                <div className="space-y-3">
-                  {bids.map((bid, i) => (
-                    <div key={bid.id} className={`bg-[#f4f4f4] rounded-2xl p-5 flex items-center justify-between ${i === 0 ? 'border-2 border-[#4757bf]' : ''}`}>
-                      <div className="flex items-center gap-4">
-                        <div className={`text-lg font-bold w-8 ${i === 0 ? 'text-[#4757bf]' : 'text-[#979797]'}`}>#{i + 1}</div>
-                        <div>
-                          <div className="font-bold text-xl text-[#111]">R{(bid.amount / 100).toLocaleString()}</div>
-                          <div className="text-[#979797] text-xs">{new Date(bid.created_at).toLocaleDateString()}</div>
-                        </div>
-                      </div>
-                      {i === 0 && <span className="text-xs bg-[#fff0ee] text-[#4757bf] px-3 py-1 rounded-full font-medium">🏆 Leading</span>}
-                    </div>
-                  ))}
-                </div>
-              )
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

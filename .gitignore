@@ -2,6 +2,16 @@
 
 # dependencies
 /node_modules
+apps/web/node_modules/
+apps/mobile/node_modules/
+packages/*/node_modules/
+
+# next.js build output (monorepo)
+apps/web/.next/
+apps/web/out/
+
+# expo
+apps/mobile/.expo/
 /.pnp
 .pnp.*
 .yarn/*

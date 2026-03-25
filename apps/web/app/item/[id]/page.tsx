@@ -128,7 +128,7 @@ export default function ItemPage() {
   useEffect(() => {
     if (!editProvince) { setEditSchools([]); return; }
     setLoadingEditSchools(true);
-    supabase.from('schools').select('*').eq('province', editProvince).order('name')
+    supabase.from('schools').select('*').eq('province_code', editProvince).order('name')
       .then(({ data }) => { setEditSchools((data as School[]) ?? []); setLoadingEditSchools(false); });
   }, [editProvince]);
 

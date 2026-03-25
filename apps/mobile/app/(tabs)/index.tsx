@@ -7,8 +7,25 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
+import {
+  Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
+  School as SchoolIcon, Globe,
+} from 'lucide-react-native';
 import { ALL_CATEGORIES, PLATFORM_DEFAULTS } from '@nextkid/shared';
 import type { ListingCategory, School } from '@nextkid/shared';
+
+function CategoryIcon({ name, color, size = 20 }: { name: string; color: string; size?: number }) {
+  const props = { size, strokeWidth: 2, color };
+  switch (name) {
+    case 'School Uniforms': return <Shirt {...props} />;
+    case 'School Sports Kit': return <Trophy {...props} />;
+    case 'Shoes': return <Footprints {...props} />;
+    case 'Sports Equipment': return <Dumbbell {...props} />;
+    case 'Books & Stationery': return <BookOpen {...props} />;
+    case 'Bags & Accessories': return <ShoppingBag {...props} />;
+    default: return <Package {...props} />;
+  }
+}
 
 type Item = {
   id: string;
@@ -61,11 +78,12 @@ export default function BrowseScreen() {
     if (category !== 'All') query = query.eq('category', category);
     if (debouncedSearch) query = query.ilike('title', `%${debouncedSearch}%`);
 
-    if (tab === 'my_school' && userSchools.length > 0) {
+    if (tab === 'my_school') {
+      // No school saved — return nothing (user needs to add a school first)
+      if (userSchools.length === 0) { setItems([]); setLoading(false); return; }
       query = query.in('school_id', userSchools.map(s => s.id));
-    } else if (tab === 'all') {
-      query = query.or('is_school_specific.eq.false,is_school_specific.is.null');
     }
+    // All Items tab — no school filter, everything is visible for maximum seller reach
 
     const { data, error } = await query;
     if (error) console.error('Browse error:', error);
@@ -83,13 +101,16 @@ export default function BrowseScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.brand}>NextKid</Text>
-        <TextInput
-          style={styles.searchInput}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search listings..."
-          placeholderTextColor="#555"
-        />
+        <View style={styles.searchWrap}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search listings..."
+            placeholderTextColor="#979797"
+          />
+        </View>
       </View>
 
       {/* Tab switcher */}
@@ -98,17 +119,21 @@ export default function BrowseScreen() {
           style={[styles.tab, tab === 'my_school' && styles.tabActive]}
           onPress={() => setTab('my_school')}
         >
-          <Text style={[styles.tabText, tab === 'my_school' && styles.tabTextActive]}>
-            🏫 My School
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <SchoolIcon size={14} strokeWidth={2} color={tab === 'my_school' ? '#111' : '#979797'} />
+            <Text style={[styles.tabText, tab === 'my_school' && styles.tabTextActive]}>My School</Text>
+          </View>
+          {tab === 'my_school' && <View style={styles.tabIndicator} />}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, tab === 'all' && styles.tabActive]}
           onPress={() => setTab('all')}
         >
-          <Text style={[styles.tabText, tab === 'all' && styles.tabTextActive]}>
-            🌍 All Items
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <Globe size={14} strokeWidth={2} color={tab === 'all' ? '#111' : '#979797'} />
+            <Text style={[styles.tabText, tab === 'all' && styles.tabTextActive]}>All Items</Text>
+          </View>
+          {tab === 'all' && <View style={styles.tabIndicator} />}
         </TouchableOpacity>
       </View>
 
@@ -132,18 +157,31 @@ export default function BrowseScreen() {
             onPress={() => setCategory(cat)}
             style={[styles.pill, category === cat && styles.pillActive]}
           >
-            <Text style={[styles.pillText, category === cat && styles.pillTextActive]} numberOfLines={1}>{cat}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              {cat !== 'All' && (
+                <CategoryIcon
+                  name={cat}
+                  color={category === cat ? '#ffffff' : '#979797'}
+                  size={14}
+                />
+              )}
+              <Text style={[styles.pillText, category === cat && styles.pillTextActive]}>{cat}</Text>
+            </View>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
       {/* Listings grid */}
       {loading ? (
-        <ActivityIndicator color="#a855f7" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#4757bf" style={{ marginTop: 40 }} />
       ) : items.length === 0 ? (
-        <Text style={styles.empty}>
-          {tab === 'my_school' && !hasSchools ? 'Add a school to see listings.' : 'No listings found.'}
-        </Text>
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyEmoji}>🔍</Text>
+          <Text style={styles.emptyTitle}>No listings found</Text>
+          <Text style={styles.emptyText}>
+            {tab === 'my_school' && !hasSchools ? 'Add a school to see listings.' : 'Try adjusting your filters.'}
+          </Text>
+        </View>
       ) : (
         <FlatList
           data={items}
@@ -155,18 +193,22 @@ export default function BrowseScreen() {
             <TouchableOpacity
               style={styles.card}
               onPress={() => router.push(`/item/${item.id}` as never)}
-              activeOpacity={0.8}
+              activeOpacity={0.85}
             >
               {item.images?.[0] ? (
                 <Image source={{ uri: item.images[0] }} style={styles.cardImage} />
               ) : (
                 <View style={styles.cardImagePlaceholder}>
-                  <Text style={{ fontSize: 36 }}>📦</Text>
+                  <CategoryIcon name={item.category} color="#dedede" size={36} />
                 </View>
               )}
               <View style={styles.cardBody}>
                 <Text style={styles.cardCategory}>{item.category}</Text>
-                {item.size && <Text style={styles.cardSize}>Size {item.size}</Text>}
+                {item.size && (
+                  <View style={styles.sizeBadge}>
+                    <Text style={styles.sizeBadgeText}>Size {item.size}</Text>
+                  </View>
+                )}
                 <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
                 <Text style={styles.cardPrice}>R{(item.price / 100).toLocaleString()}</Text>
               </View>
@@ -178,51 +220,75 @@ export default function BrowseScreen() {
   );
 }
 
+const CORAL = '#4757bf';
+const BORDER = '#dedede';
+const SURFACE = '#f4f4f4';
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a' },
-  header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
-  brand: { color: '#a855f7', fontWeight: '800', fontSize: 22, marginBottom: 10 },
-  searchInput: {
-    backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12,
-    color: '#fff', fontSize: 14, borderWidth: 1, borderColor: '#2a2a2a',
+  container: { flex: 1, backgroundColor: '#ffffff' },
+
+  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, backgroundColor: '#ffffff' },
+  brand: { color: CORAL, fontWeight: '800', fontSize: 22, marginBottom: 10 },
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: SURFACE, borderRadius: 24, paddingHorizontal: 14, paddingVertical: 10,
   },
-  tabs: { flexDirection: 'row', paddingHorizontal: 16, gap: 8, marginBottom: 4 },
-  tab: {
-    flex: 1, paddingVertical: 8, borderRadius: 20, alignItems: 'center',
-    backgroundColor: '#111', borderWidth: 1, borderColor: '#2a2a2a',
+  searchIcon: { fontSize: 14, marginRight: 8 },
+  searchInput: { flex: 1, color: '#111', fontSize: 14 },
+
+  tabs: {
+    flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER,
+    backgroundColor: '#ffffff',
   },
-  tabActive: { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
-  tabText: { color: '#888', fontSize: 13, fontWeight: '600' },
-  tabTextActive: { color: '#fff' },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 12, position: 'relative' },
+  tabActive: {},
+  tabText: { color: '#979797', fontSize: 13, fontWeight: '500' },
+  tabTextActive: { color: CORAL, fontWeight: '600' },
+  tabIndicator: {
+    position: 'absolute', bottom: 0, left: 16, right: 16, height: 2,
+    backgroundColor: CORAL, borderRadius: 2,
+  },
+
   banner: {
-    marginHorizontal: 16, marginTop: 8, padding: 12,
-    backgroundColor: '#1a1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#333',
+    marginHorizontal: 16, marginTop: 10, padding: 12,
+    backgroundColor: '#fff8f7', borderRadius: 12, borderWidth: 1, borderColor: '#ffd5cf',
   },
-  bannerText: { color: '#888', fontSize: 13, textAlign: 'center' },
-  pillList: { flexGrow: 0 },
-  pills: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+  bannerText: { color: '#979797', fontSize: 13, textAlign: 'center' },
+
+  pillList: { flexGrow: 0, flexShrink: 0, height: 50, backgroundColor: '#ffffff' },
+  pills: { paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row' },
   pill: {
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-    backgroundColor: '#111', borderWidth: 1, borderColor: '#2a2a2a',
+    height: 34, paddingHorizontal: 14, borderRadius: 17,
+    backgroundColor: SURFACE, marginRight: 8,
+    justifyContent: 'center', alignItems: 'center',
   },
-  pillActive: { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
-  pillText: { color: '#888', fontSize: 12, fontWeight: '500' },
-  pillTextActive: { color: '#fff' },
-  grid: { paddingHorizontal: 12, paddingBottom: 20 },
-  row: { gap: 12, marginBottom: 12 },
+  pillActive: { backgroundColor: CORAL },
+  pillText: { color: '#111', fontSize: 12, fontWeight: '500' },
+  pillTextActive: { color: '#ffffff' },
+
+  grid: { paddingHorizontal: 12, paddingBottom: 20, paddingTop: 4 },
+  row: { gap: 10, marginBottom: 10 },
   card: {
-    flex: 1, backgroundColor: '#111', borderRadius: 16,
-    overflow: 'hidden', borderWidth: 1, borderColor: '#222',
+    flex: 1, backgroundColor: '#ffffff', borderRadius: 16,
+    overflow: 'hidden', borderWidth: 1, borderColor: BORDER,
   },
-  cardImage: { width: '100%', height: 130 },
+  cardImage: { width: '100%', aspectRatio: 1 },
   cardImagePlaceholder: {
-    width: '100%', height: 130, backgroundColor: '#1a1a1a',
+    width: '100%', aspectRatio: 1, backgroundColor: SURFACE,
     alignItems: 'center', justifyContent: 'center',
   },
   cardBody: { padding: 10 },
-  cardCategory: { color: '#a855f7', fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 1 },
-  cardSize: { color: '#666', fontSize: 10, marginBottom: 2 },
-  cardTitle: { color: '#fff', fontSize: 12, fontWeight: '600', marginBottom: 5 },
-  cardPrice: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  empty: { color: '#555', textAlign: 'center', marginTop: 60, fontSize: 15 },
+  cardCategory: { color: '#979797', fontSize: 10, fontWeight: '500', marginBottom: 2 },
+  sizeBadge: {
+    alignSelf: 'flex-start', backgroundColor: SURFACE,
+    borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4,
+  },
+  sizeBadgeText: { color: '#979797', fontSize: 10 },
+  cardTitle: { color: '#111', fontSize: 12, fontWeight: '500', marginBottom: 6, lineHeight: 16 },
+  cardPrice: { color: CORAL, fontSize: 15, fontWeight: '800' },
+
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 60 },
+  emptyEmoji: { fontSize: 48, marginBottom: 12 },
+  emptyTitle: { color: '#111', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  emptyText: { color: '#979797', fontSize: 13 },
 });

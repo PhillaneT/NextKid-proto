@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { School, Lock, Package } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -37,84 +38,87 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#0a0a0a',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'system-ui, sans-serif'
-    }}>
-      <div style={{
-        background: '#1a1a1a',
-        border: '1px solid #333',
-        borderRadius: '12px',
-        padding: '40px',
-        width: '100%',
-        maxWidth: '400px'
-      }}>
-        <h1 style={{ color: '#fff', marginBottom: '8px', fontSize: '24px' }}>
-          {isLogin ? 'Welcome back' : 'Create account'}
-        </h1>
-        <p style={{ color: '#888', marginBottom: '32px', fontSize: '14px' }}>
-          {isLogin ? 'Sign in to your account' : 'Join us today'}
-        </p>
-
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ color: '#aaa', fontSize: '13px', display: 'block', marginBottom: '6px' }}>Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            style={{
-              width: '100%', padding: '12px', borderRadius: '8px',
-              background: '#2a2a2a', border: '1px solid #444',
-              color: '#fff', fontSize: '14px', boxSizing: 'border-box'
-            }}
-          />
+    <div className="min-h-screen bg-[#f4f4f4] flex">
+      {/* Left panel — branding */}
+      <div className="hidden md:flex flex-col justify-between w-1/2 bg-[#4757bf] p-12">
+        <div>
+          <span className="text-3xl font-bold text-white">NextKid</span>
         </div>
-
-        <div style={{ marginBottom: '24px' }}>
-          <label style={{ color: '#aaa', fontSize: '13px', display: 'block', marginBottom: '6px' }}>Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="••••••••"
-            style={{
-              width: '100%', padding: '12px', borderRadius: '8px',
-              background: '#2a2a2a', border: '1px solid #444',
-              color: '#fff', fontSize: '14px', boxSizing: 'border-box'
-            }}
-          />
+        <div>
+          <h2 className="text-4xl font-bold text-white mb-4 leading-tight">
+            South Africa&apos;s school marketplace
+          </h2>
+          <p className="text-white/80 text-lg">
+            Buy and sell uniforms, books, sports kit and more — safely and securely.
+          </p>
+          <div className="mt-10 flex flex-col gap-4 text-white/90 text-sm">
+            <div className="flex items-center gap-3"><School size={18} strokeWidth={2} className="shrink-0" /><span>School-specific listings</span></div>
+            <div className="flex items-center gap-3"><Lock size={18} strokeWidth={2} className="shrink-0" /><span>Escrow payments via Peach Payments</span></div>
+            <div className="flex items-center gap-3"><Package size={18} strokeWidth={2} className="shrink-0" /><span>Tracked shipping on every order</span></div>
+          </div>
         </div>
+        <p className="text-white/50 text-xs">NextKid © 2025</p>
+      </div>
 
-        {error && <p style={{ color: '#ff6b6b', fontSize: '13px', marginBottom: '16px' }}>{error}</p>}
-        {message && <p style={{ color: '#6bffb8', fontSize: '13px', marginBottom: '16px' }}>{message}</p>}
+      {/* Right panel — form */}
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="w-full max-w-sm">
+          <div className="md:hidden mb-8 text-center">
+            <span className="text-2xl font-bold" style={{ color: '#4757bf' }}>NextKid</span>
+          </div>
 
-        <button
-          onClick={handleSubmit}
-          disabled={loading}
-          style={{
-            width: '100%', padding: '13px', borderRadius: '8px',
-            background: loading ? '#555' : '#6c63ff',
-            color: '#fff', border: 'none', fontSize: '15px',
-            fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
-        </button>
+          <h1 className="text-2xl font-bold text-[#111] mb-1">
+            {isLogin ? 'Welcome back' : 'Create account'}
+          </h1>
+          <p className="text-[#979797] text-sm mb-8">
+            {isLogin ? 'Sign in to your account' : 'Join NextKid today'}
+          </p>
 
-        <p style={{ color: '#888', fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>
-          {isLogin ? "Don't have an account? " : 'Already have an account? '}
-          <span
-            onClick={() => { setIsLogin(!isLogin); setError(''); setMessage('') }}
-            style={{ color: '#6c63ff', cursor: 'pointer' }}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-[#111] mb-1.5">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#4757bf]/30 focus:border-[#4757bf] transition"
+            />
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-[#111] mb-1.5">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#4757bf]/30 focus:border-[#4757bf] transition"
+            />
+          </div>
+
+          {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+          {message && <p className="text-green-600 text-sm mb-4">{message}</p>}
+
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="w-full py-3 rounded-full bg-[#4757bf] text-white font-semibold text-sm hover:bg-[#3a48a8] disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
-            {isLogin ? 'Sign up' : 'Sign in'}
-          </span>
-        </p>
+            {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
+          </button>
+
+          <p className="text-[#979797] text-sm text-center mt-6">
+            {isLogin ? "Don't have an account? " : 'Already have an account? '}
+            <button
+              onClick={() => { setIsLogin(!isLogin); setError(''); setMessage('') }}
+              className="text-[#4757bf] font-medium hover:underline"
+            >
+              {isLogin ? 'Sign up' : 'Sign in'}
+            </button>
+          </p>
+        </div>
       </div>
     </div>
   )

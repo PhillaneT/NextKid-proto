@@ -2,9 +2,33 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
+  School as SchoolIcon, Search,
+} from 'lucide-react';
 import { ALL_CATEGORIES, PLATFORM_DEFAULTS } from '@nextkid/shared';
 import type { ListingCategory, School } from '@nextkid/shared';
+
+const CATEGORY_ICON: Record<string, React.ReactNode> = {
+  'School Uniforms': <Shirt size={14} strokeWidth={2} />,
+  'School Sports Kit': <Trophy size={14} strokeWidth={2} />,
+  'Shoes': <Footprints size={14} strokeWidth={2} />,
+  'Sports Equipment': <Dumbbell size={14} strokeWidth={2} />,
+  'Books & Stationery': <BookOpen size={14} strokeWidth={2} />,
+  'Bags & Accessories': <ShoppingBag size={14} strokeWidth={2} />,
+  'Other': <Package size={14} strokeWidth={2} />,
+};
+
+const CATEGORY_ICON_LG: Record<string, React.ReactNode> = {
+  'School Uniforms': <Shirt size={32} strokeWidth={1.5} />,
+  'School Sports Kit': <Trophy size={32} strokeWidth={1.5} />,
+  'Shoes': <Footprints size={32} strokeWidth={1.5} />,
+  'Sports Equipment': <Dumbbell size={32} strokeWidth={1.5} />,
+  'Books & Stationery': <BookOpen size={32} strokeWidth={1.5} />,
+  'Bags & Accessories': <ShoppingBag size={32} strokeWidth={1.5} />,
+  'Other': <Package size={32} strokeWidth={1.5} />,
+};
 
 type Item = {
   id: string;
@@ -21,12 +45,13 @@ type BrowseTab = 'my_school' | 'all';
 
 export default function BrowsePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<BrowseTab>('all');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<ListingCategory | 'All'>('All');
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') ?? '');
+  const [debouncedSearch, setDebouncedSearch] = useState(searchParams.get('q') ?? '');
   const [userSchools, setUserSchools] = useState<School[]>([]);
 
   // RULE: debounce search input at 300ms to keep results fast
@@ -47,6 +72,14 @@ export default function BrowsePage() {
     });
   }, []);
 
+  // Apply category filter from URL param
+  useEffect(() => {
+    const cat = searchParams.get('category');
+    if (cat && ALL_CATEGORIES.includes(cat as ListingCategory)) {
+      setCategory(cat as ListingCategory);
+    }
+  }, [searchParams]);
+
   const fetchItems = useCallback(async () => {
     setLoading(true);
     let query = supabase
@@ -62,10 +95,8 @@ export default function BrowsePage() {
       if (userSchools.length === 0) { setItems([]); setLoading(false); return; }
       // Show items linked to the user's schools
       query = query.in('school_id', userSchools.map(s => s.id));
-    } else {
-      // All Items tab — show only nationwide/generic items
-      query = query.or('is_school_specific.eq.false,is_school_specific.is.null');
     }
+    // All Items tab — no school filter, everything is visible for maximum seller reach
 
     const { data, error } = await query;
     if (error) console.error('Browse error:', error);
@@ -78,41 +109,40 @@ export default function BrowsePage() {
   const hasSchools = userSchools.length > 0;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a]">
-      <div className="max-w-6xl mx-auto px-6 py-10">
-        <h1 className="text-4xl font-bold text-white mb-1">Browse Listings</h1>
-        <p className="text-gray-400 mb-6">Discover second-hand school items across South Africa</p>
+    <div className="min-h-screen bg-white">
+      <div className="max-w-7xl mx-auto px-6 py-8">
+
+        {/* Page header */}
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-[#111]">Browse Listings</h1>
+          <p className="text-[#979797] text-sm mt-1">Second-hand school items across South Africa</p>
+        </div>
 
         {/* Tab switcher */}
-        <div className="flex gap-2 mb-6">
-          <button
-            onClick={() => setTab('my_school')}
-            className={`px-5 py-2 rounded-full text-sm font-semibold transition ${tab === 'my_school' ? 'bg-violet-600 text-white' : 'bg-[#111] text-gray-400 border border-[#222] hover:bg-[#1a1a1a]'}`}
-          >
-            🏫 My School{hasSchools ? ` (${userSchools.map(s => s.name.split(' ')[0]).join(', ')})` : ''}
-          </button>
-          <button
-            onClick={() => setTab('all')}
-            className={`px-5 py-2 rounded-full text-sm font-semibold transition ${tab === 'all' ? 'bg-violet-600 text-white' : 'bg-[#111] text-gray-400 border border-[#222] hover:bg-[#1a1a1a]'}`}
-          >
-            🌍 All Items
-          </button>
+        <div className="flex border-b border-[#dedede] mb-6">
+          <TabBtn icon={<SchoolIcon size={14} strokeWidth={2} />} label={`My School${hasSchools ? ` (${userSchools.map(s => s.name.split(' ')[0]).join(', ')})` : ''}`} active={tab === 'my_school'} onClick={() => setTab('my_school')} />
+          <TabBtn icon={<Package size={14} strokeWidth={2} />} label="All Items" active={tab === 'all'} onClick={() => setTab('all')} />
         </div>
 
         {tab === 'my_school' && !hasSchools && (
-          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-5 mb-6 flex items-center justify-between">
-            <p className="text-gray-400 text-sm">You haven&apos;t added a school yet. Add one to see uniform and sports kit listings.</p>
-            <button onClick={() => router.push('/dashboard')} className="ml-4 px-4 py-2 bg-violet-600 text-white text-sm rounded-lg shrink-0">Add School</button>
+          <div className="bg-[#fff8f7] border border-[#4757bf]/30 rounded-2xl p-5 mb-6 flex items-center justify-between">
+            <p className="text-[#979797] text-sm">You haven&apos;t added a school yet. Add one to see uniform and sports kit listings.</p>
+            <button onClick={() => router.push('/dashboard')} className="ml-4 px-4 py-2 bg-[#4757bf] text-white text-sm rounded-full shrink-0 hover:bg-[#3a48a8] transition">Add School</button>
           </div>
         )}
 
         {/* Search */}
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search listings..."
-          className="w-full bg-[#111] border border-[#222] text-white placeholder-gray-600 rounded-xl px-4 py-3 mb-6 focus:outline-none focus:border-violet-500"
-        />
+        <div className="relative mb-6">
+          <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-[#979797] w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search listings..."
+            className="w-full bg-[#f4f4f4] rounded-full pl-10 pr-4 py-3 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#4757bf]/30 transition"
+          />
+        </div>
 
         {/* Category pills */}
         <div className="flex flex-wrap gap-2 mb-8">
@@ -120,8 +150,15 @@ export default function BrowsePage() {
             <button
               key={cat}
               onClick={() => setCategory(cat)}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition ${category === cat ? 'bg-violet-600 text-white' : 'bg-[#111] text-gray-400 border border-[#222] hover:bg-[#1a1a1a]'}`}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition ${
+                category === cat
+                  ? 'bg-[#4757bf] text-white'
+                  : 'bg-[#f4f4f4] text-[#111] hover:bg-[#eef0fb] hover:text-[#4757bf]'
+              }`}
             >
+              {cat !== 'All' && (
+                <span className="flex items-center">{CATEGORY_ICON[cat as ListingCategory] ?? null}</span>
+              )}
               {cat}
             </button>
           ))}
@@ -129,33 +166,47 @@ export default function BrowsePage() {
 
         {/* Results */}
         {loading ? (
-          <p className="text-gray-500 text-center py-20">Loading...</p>
+          <div className="flex items-center justify-center py-24 text-[#979797]">Loading...</div>
         ) : items.length === 0 ? (
-          <p className="text-gray-500 text-center py-20">
-            {tab === 'my_school' && !hasSchools ? 'Add a school to see listings.' : 'No listings found.'}
-          </p>
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <Search size={48} strokeWidth={1.5} className="text-[#dedede] mb-4" />
+            <p className="text-[#111] font-semibold">No listings found</p>
+            <p className="text-[#979797] text-sm mt-1">
+              {tab === 'my_school' && !hasSchools ? 'Add a school to see listings.' : 'Try adjusting your filters.'}
+            </p>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {items.map(item => (
               <div
                 key={item.id}
                 onClick={() => router.push(`/item/${item.id}`)}
-                className="bg-[#111] border border-[#222] rounded-2xl overflow-hidden hover:border-violet-500 transition cursor-pointer group"
+                className="bg-white border border-[#dedede] rounded-2xl overflow-hidden hover:shadow-md hover:border-[#4757bf]/40 transition cursor-pointer group"
               >
-                <div className="h-48 bg-[#1a1a1a]">
+                {/* Image */}
+                <div className="aspect-square bg-[#f4f4f4] overflow-hidden">
                   {item.images?.[0] ? (
-                    <img src={item.images[0]} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+                    <img
+                      src={item.images[0]}
+                      alt={item.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                    />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-5xl text-gray-700">📦</div>
+                    <div className="w-full h-full flex items-center justify-center text-[#dedede]">
+                      {CATEGORY_ICON_LG[item.category as ListingCategory] ?? <Package size={32} strokeWidth={1.5} />}
+                    </div>
                   )}
                 </div>
-                <div className="p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs uppercase tracking-widest text-violet-400 font-semibold">{item.category}</span>
-                    {item.size && <span className="text-xs text-gray-500 bg-[#222] px-2 py-0.5 rounded-full">Size {item.size}</span>}
-                  </div>
-                  <h3 className="font-semibold text-white text-sm line-clamp-2 mb-2">{item.title}</h3>
-                  <p className="text-xl font-bold text-white">R{(item.price / 100).toLocaleString()}</p>
+
+                {/* Details */}
+                <div className="p-3">
+                  <p className="text-xs text-[#979797] mb-1 flex items-center gap-1">
+                    <span className="text-[#979797]">{CATEGORY_ICON[item.category as ListingCategory] ?? null}</span>
+                    <span>{item.category}</span>
+                    {item.size && <span className="ml-auto bg-[#f4f4f4] px-1.5 py-0.5 rounded text-[10px]">Size {item.size}</span>}
+                  </p>
+                  <h3 className="text-sm font-medium text-[#111] line-clamp-2 leading-snug mb-2">{item.title}</h3>
+                  <p className="text-base font-bold text-[#4757bf]">R{(item.price / 100).toLocaleString()}</p>
                 </div>
               </div>
             ))}
@@ -163,5 +214,21 @@ export default function BrowsePage() {
         )}
       </div>
     </div>
+  );
+}
+
+function TabBtn({ icon, label, active, onClick }: { icon?: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-5 py-3 text-sm font-medium border-b-2 transition -mb-px ${
+        active
+          ? 'border-[#4757bf] text-[#4757bf]'
+          : 'border-transparent text-[#979797] hover:text-[#111]'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

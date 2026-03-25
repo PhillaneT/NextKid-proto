@@ -49,8 +49,13 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.card}>
+      {/* Coral top banner */}
+      <View style={styles.topBanner}>
         <Text style={styles.brand}>NextKid</Text>
+        <Text style={styles.tagline}>South Africa&apos;s school marketplace</Text>
+      </View>
+
+      <View style={styles.card}>
         <Text style={styles.title}>{isLogin ? 'Welcome back' : 'Create account'}</Text>
         <Text style={styles.subtitle}>{isLogin ? 'Sign in to your account' : 'Join the marketplace'}</Text>
 
@@ -60,7 +65,7 @@ export default function LoginScreen() {
           value={email}
           onChangeText={setEmail}
           placeholder="you@example.com"
-          placeholderTextColor="#555"
+          placeholderTextColor="#979797"
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
@@ -72,7 +77,7 @@ export default function LoginScreen() {
           value={password}
           onChangeText={setPassword}
           placeholder="••••••••"
-          placeholderTextColor="#555"
+          placeholderTextColor="#979797"
           secureTextEntry
         />
 
@@ -98,24 +103,33 @@ export default function LoginScreen() {
   );
 }
 
+const CORAL = '#4757bf';
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', padding: 24 },
-  card: { backgroundColor: '#111', borderRadius: 16, padding: 28, borderWidth: 1, borderColor: '#222' },
-  brand: { color: '#a855f7', fontSize: 22, fontWeight: '800', marginBottom: 16 },
-  title: { color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 4 },
-  subtitle: { color: '#888', fontSize: 14, marginBottom: 28 },
-  label: { color: '#aaa', fontSize: 13, marginBottom: 6 },
+  container: { flex: 1, backgroundColor: '#f4f4f4' },
+  topBanner: {
+    backgroundColor: CORAL, paddingHorizontal: 24, paddingTop: 64, paddingBottom: 32,
+  },
+  brand: { color: '#fff', fontSize: 28, fontWeight: '800', marginBottom: 4 },
+  tagline: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
+  card: {
+    backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 28, flex: 1, marginTop: -12,
+  },
+  title: { color: '#111', fontSize: 22, fontWeight: '700', marginBottom: 4, marginTop: 8 },
+  subtitle: { color: '#979797', fontSize: 14, marginBottom: 24 },
+  label: { color: '#111', fontSize: 13, fontWeight: '500', marginBottom: 6 },
   input: {
-    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333',
-    borderRadius: 10, padding: 14, color: '#fff', fontSize: 15, marginBottom: 16,
+    backgroundColor: '#f4f4f4', borderWidth: 1, borderColor: '#dedede',
+    borderRadius: 12, padding: 14, color: '#111', fontSize: 15, marginBottom: 14,
   },
   button: {
-    backgroundColor: '#7c3aed', borderRadius: 10, padding: 15,
+    backgroundColor: CORAL, borderRadius: 30, padding: 16,
     alignItems: 'center', marginTop: 8,
   },
-  buttonDisabled: { backgroundColor: '#444' },
+  buttonDisabled: { backgroundColor: '#dedede' },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   switchRow: { marginTop: 20, alignItems: 'center' },
-  switchText: { color: '#888', fontSize: 13 },
-  switchLink: { color: '#7c3aed', fontWeight: '600' },
+  switchText: { color: '#979797', fontSize: 13 },
+  switchLink: { color: CORAL, fontWeight: '600' },
 });

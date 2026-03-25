@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useParams } from 'next/navigation';
-import { Pencil, Trash2, X, Check, Bell } from 'lucide-react';
+import { Pencil, Trash2, X, Check, Heart, MapPin, ShoppingBag, School as SchoolIcon } from 'lucide-react';
 import { ALL_CATEGORIES, SUBCATEGORIES, LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES, SCHOOL_SPECIFIC_CATEGORIES } from '@nextkid/shared';
 import type { ListingCategory, School } from '@nextkid/shared';
 
@@ -28,6 +28,7 @@ type Item = {
   size: string | null;
   gender: string | null;
   grade: number | null;
+  condition: string | null;
 };
 
 type Offer = {
@@ -57,7 +58,14 @@ export default function ItemPage() {
   const [selectedImage, setSelectedImage] = useState(0);
   const [isOwner, setIsOwner] = useState(false);
   const [isAgeVerified, setIsAgeVerified] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+  const [sellerProvince, setSellerProvince] = useState<string | null>(null);
+  const [sellerSoldCount, setSellerSoldCount] = useState(0);
+  const [viewSchoolName, setViewSchoolName] = useState<string | null>(null);
+  const [showLightbox, setShowLightbox] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -66,14 +74,12 @@ export default function ItemPage() {
   const [editImageUrls, setEditImageUrls] = useState<string[]>([]);
   const [uploadingEdit, setUploadingEdit] = useState(false);
 
-  // Offer state
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
   const [offerMessage, setOfferMessage] = useState('');
   const [submittingOffer, setSubmittingOffer] = useState(false);
   const [offerSuccess, setOfferSuccess] = useState(false);
 
-  // Bid state
   const [showBidModal, setShowBidModal] = useState(false);
   const [bidAmount, setBidAmount] = useState('');
   const [submittingBid, setSubmittingBid] = useState(false);
@@ -81,10 +87,8 @@ export default function ItemPage() {
   const [highestBid, setHighestBid] = useState<number | null>(null);
   const [userHasBid, setUserHasBid] = useState(false);
 
-  // Seller view
   const [offers, setOffers] = useState<Offer[]>([]);
   const [bids, setBids] = useState<Bid[]>([]);
-  const [activeSellerTab, setActiveSellerTab] = useState<'offers' | 'bids'>('offers');
 
   const [editForm, setEditForm] = useState({
     title: '', category: '', subcategory: '', price: '',
@@ -92,7 +96,6 @@ export default function ItemPage() {
     part1: '', part2: '', part3: '', part4: '', part5: '',
     size: '', gender: '', grade: '', is_school_specific: false,
   });
-  // School picker state for edit mode
   const [editSchoolId, setEditSchoolId] = useState<string | null>(null);
   const [editSchoolName, setEditSchoolName] = useState('');
   const [editProvince, setEditProvince] = useState('');
@@ -108,8 +111,7 @@ export default function ItemPage() {
     const newPreviews: string[] = [];
     const newUrls: string[] = [];
     for (const file of files) {
-      const preview = URL.createObjectURL(file);
-      newPreviews.push(preview);
+      newPreviews.push(URL.createObjectURL(file));
       const fileName = `items/${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
       const { error } = await supabase.storage.from('item-images').upload(fileName, file);
       if (!error) {
@@ -127,9 +129,7 @@ export default function ItemPage() {
     setEditImageUrls(prev => prev.filter((_, i) => i !== index));
   };
 
-  useEffect(() => {
-    if (id) fetchItem();
-  }, [id]);
+  useEffect(() => { if (id) fetchItem(); }, [id]);
 
   useEffect(() => {
     if (!editProvince) { setEditSchools([]); return; }
@@ -139,67 +139,71 @@ export default function ItemPage() {
   }, [editProvince]);
 
   async function fetchItem() {
-  const { data, error } = await supabase.from('items').select('*').eq('id', id).single();
-  if (error) { console.error(error); setLoading(false); return; }
+    const { data, error } = await supabase.from('items').select('*').eq('id', id).single();
+    if (error) { console.error(error); setLoading(false); return; }
+    setItem(data);
+    setEditForm({
+      title: data.title, category: data.category, subcategory: data.subcategory || '',
+      price: String(data.price / 100),
+      listing_type: data.listing_type || 'buy_now', auction_days: '3',
+      part1: data.description_part1 || '', part2: data.description_part2 || '',
+      part3: data.description_part3 || '', part4: data.description_part4 || '',
+      part5: data.description_part5 || '',
+      size: data.size || '', gender: data.gender || '',
+      grade: data.grade ? String(data.grade) : '',
+      is_school_specific: data.is_school_specific || false,
+    });
+    setEditSchoolId(data.school_id || null);
+    if (data.school_id) {
+      supabase.from('schools').select('name').eq('id', data.school_id).single()
+        .then(({ data: s }) => { if (s) setEditSchoolName(s.name); });
+    }
+    // Fetch seller stats (province + sold count) and school name for school-specific items
+    const [{ data: sellerProfile }, { count: soldCount }, { count: likes }, { data: schoolRow }] = await Promise.all([
+      supabase.from('profiles').select('province').eq('id', data.seller_id).single(),
+      supabase.from('items').select('*', { count: 'exact', head: true }).eq('seller_id', data.seller_id).eq('status', 'sold'),
+      supabase.from('likes').select('*', { count: 'exact', head: true }).eq('item_id', data.id),
+      data.school_id
+        ? supabase.from('schools').select('name').eq('id', data.school_id).single()
+        : Promise.resolve({ data: null }),
+    ]);
+    setSellerProvince(sellerProfile?.province ?? null);
+    setSellerSoldCount(soldCount ?? 0);
+    setViewSchoolName(schoolRow?.name ?? null);
+    setLikeCount(likes ?? 0);
 
-  setItem(data);
-
-  setEditForm({
-    title: data.title, category: data.category, subcategory: data.subcategory || '',
-    price: String(data.price / 100),
-    listing_type: data.listing_type || 'buy_now', auction_days: '3',
-    part1: data.description_part1 || '', part2: data.description_part2 || '',
-    part3: data.description_part3 || '', part4: data.description_part4 || '',
-    part5: data.description_part5 || '',
-    size: data.size || '', gender: data.gender || '',
-    grade: data.grade ? String(data.grade) : '',
-    is_school_specific: data.is_school_specific || false,
-  });
-  setEditSchoolId(data.school_id || null);
-  if (data.school_id) {
-    supabase.from('schools').select('name').eq('id', data.school_id).single()
-      .then(({ data: s }) => { if (s) setEditSchoolName(s.name); });
-  }
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (user) {
-    setCurrentUserId(user.id);
-    const owner = user.id === data.seller_id;
-    setIsOwner(owner);
-
-    const { data: profileData } = await supabase.from('profiles').select('is_age_verified').eq('id', user.id).single();
-    setIsAgeVerified(profileData?.is_age_verified || false);
-
-    if (owner) {
-      fetchOffers(data.id);
-      fetchBids(data.id);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      setIsLoggedIn(true);
+      setCurrentUserId(user.id);
+      const owner = user.id === data.seller_id;
+      setIsOwner(owner);
+      const [{ data: profileData }, { data: likedRow }] = await Promise.all([
+        supabase.from('profiles').select('is_age_verified').eq('id', user.id).single(),
+        supabase.from('likes').select('id').eq('item_id', data.id).eq('user_id', user.id).maybeSingle(),
+      ]);
+      setIsAgeVerified(profileData?.is_age_verified || false);
+      setLiked(!!likedRow);
+      if (owner) { fetchOffers(data.id); fetchBids(data.id); }
+      else { fetchHighestBid(data.id); checkUserBid(data.id, user.id); }
     } else {
       fetchHighestBid(data.id);
-      checkUserBid(data.id, user.id);
     }
-  } else {
-    // Unauthenticated visitor — just load bid info for display
-    fetchHighestBid(data.id);
-  }
-
-  setLoading(false);
+    setLoading(false);
   }
 
   async function fetchOffers(itemId: string) {
     const { data } = await supabase.from('offers').select('*').eq('item_id', itemId).order('created_at', { ascending: false });
     setOffers(data || []);
   }
-
   async function fetchBids(itemId: string) {
     const { data } = await supabase.from('bids').select('*').eq('item_id', itemId).order('amount', { ascending: false });
     setBids(data || []);
   }
-
   async function fetchHighestBid(itemId: string) {
     const { data } = await supabase.from('bids').select('amount').eq('item_id', itemId).order('amount', { ascending: false }).limit(1);
     if (data && data.length > 0) setHighestBid(data[0].amount);
   }
-
   async function checkUserBid(itemId: string, userId: string) {
     const { data } = await supabase.from('bids').select('id').eq('item_id', itemId).eq('buyer_id', userId).limit(1);
     setUserHasBid(!!(data && data.length > 0));
@@ -214,10 +218,9 @@ export default function ItemPage() {
 
   async function handleSave() {
     setSaving(true);
-const auctionEndsAt = editForm.listing_type === 'best_bids'
-  ? new Date(Date.now() + parseInt(editForm.auction_days) * 24 * 60 * 60 * 1000).toISOString()
-  : null;
-
+    const auctionEndsAt = editForm.listing_type === 'best_bids'
+      ? new Date(Date.now() + parseInt(editForm.auction_days) * 24 * 60 * 60 * 1000).toISOString()
+      : null;
     const { error } = await supabase.from('items').update({
       title: editForm.title, category: editForm.category, subcategory: editForm.subcategory || null,
       price: parseInt(editForm.price) * 100 || 0,
@@ -229,7 +232,6 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
       grade: editForm.grade ? parseInt(editForm.grade) : null,
       is_school_specific: editForm.is_school_specific,
       school_id: editForm.is_school_specific ? editSchoolId : null,
-      // Always use editImageUrls — it is initialised from item.images when entering edit mode
       images: editImageUrls,
     }).eq('id', item!.id);
     if (error) alert('Error saving: ' + error.message);
@@ -241,23 +243,17 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
     if (!offerAmount || !currentUserId) return;
     setSubmittingOffer(true);
     const amount = parseInt(offerAmount) * 100;
-
     const { error } = await supabase.from('offers').insert({
       item_id: item!.id, buyer_id: currentUserId,
       amount, message: offerMessage || null, status: 'pending',
     });
-
     if (!error) {
       await supabase.from('notifications').insert({
-        user_id: item!.seller_id,
-        type: 'offer',
-        message: `New offer of R${offerAmount} on "${item!.title}"`,
-        item_id: item!.id,
+        user_id: item!.seller_id, type: 'offer',
+        message: `New offer of R${offerAmount} on "${item!.title}"`, item_id: item!.id,
       });
       setOfferSuccess(true);
-    } else {
-      alert('Error submitting offer: ' + error.message);
-    }
+    } else { alert('Error submitting offer: ' + error.message); }
     setSubmittingOffer(false);
   }
 
@@ -265,36 +261,16 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
     if (!bidAmount || !currentUserId) return;
     setSubmittingBid(true);
     const amount = parseInt(bidAmount) * 100;
-
-    if (highestBid && amount <= highestBid) {
-      alert(`Your bid must be higher than the current highest bid of R${highestBid / 100}`);
-      setSubmittingBid(false);
-      return;
-    }
-
-    if (amount <= item!.price) {
-      alert(`Your bid must be higher than the starting price of R${item!.price / 100}`);
-      setSubmittingBid(false);
-      return;
-    }
-
-    const { error } = await supabase.from('bids').insert({
-      item_id: item!.id, buyer_id: currentUserId, amount,
-    });
-
+    if (highestBid && amount <= highestBid) { alert(`Your bid must be higher than R${highestBid / 100}`); setSubmittingBid(false); return; }
+    if (amount <= item!.price) { alert(`Your bid must be higher than the starting price of R${item!.price / 100}`); setSubmittingBid(false); return; }
+    const { error } = await supabase.from('bids').insert({ item_id: item!.id, buyer_id: currentUserId, amount });
     if (!error) {
       await supabase.from('notifications').insert({
-        user_id: item!.seller_id,
-        type: 'bid',
-        message: `New bid of R${bidAmount} on "${item!.title}"`,
-        item_id: item!.id,
+        user_id: item!.seller_id, type: 'bid',
+        message: `New bid of R${bidAmount} on "${item!.title}"`, item_id: item!.id,
       });
-      setHighestBid(amount);
-      setUserHasBid(true);
-      setBidSuccess(true);
-    } else {
-      alert('Error submitting bid: ' + error.message);
-    }
+      setHighestBid(amount); setUserHasBid(true); setBidSuccess(true);
+    } else { alert('Error submitting bid: ' + error.message); }
     setSubmittingBid(false);
   }
 
@@ -303,9 +279,7 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
     await supabase.from('notifications').insert({
       user_id: buyerId,
       type: status === 'accepted' ? 'offer_accepted' : 'offer_declined',
-      message: status === 'accepted'
-        ? `Your offer on "${item!.title}" was accepted! 🎉`
-        : `Your offer on "${item!.title}" was declined.`,
+      message: status === 'accepted' ? `Your offer on "${item!.title}" was accepted! 🎉` : `Your offer on "${item!.title}" was declined.`,
       item_id: item!.id,
     });
     fetchOffers(item!.id);
@@ -314,12 +288,23 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
   async function handleBuyNow() {
     if (!currentUserId) return;
     await supabase.from('notifications').insert({
-      user_id: item!.seller_id,
-      type: 'purchase',
-      message: `Someone purchased "${item!.title}" at R${(item!.price / 100).toLocaleString()} 🎉`,
-      item_id: item!.id,
+      user_id: item!.seller_id, type: 'purchase',
+      message: `Someone purchased "${item!.title}" at R${(item!.price / 100).toLocaleString()} 🎉`, item_id: item!.id,
     });
     alert('Purchase recorded! The seller has been notified.');
+  }
+
+  async function toggleLike() {
+    if (!currentUserId || !item) return;
+    if (liked) {
+      await supabase.from('likes').delete().eq('item_id', item.id).eq('user_id', currentUserId);
+      setLiked(false);
+      setLikeCount(c => Math.max(0, c - 1));
+    } else {
+      await supabase.from('likes').insert({ item_id: item.id, user_id: currentUserId });
+      setLiked(true);
+      setLikeCount(c => c + 1);
+    }
   }
 
   const auctionEnded = item?.auction_ends_at ? new Date(item.auction_ends_at) < new Date() : false;
@@ -328,27 +313,25 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
   function getTimeLeft(endDate: string) {
     const diff = new Date(endDate).getTime() - Date.now();
     if (diff <= 0) return 'Auction ended';
-    const d = Math.floor(diff / 86400000);
-    const h = Math.floor((diff % 86400000) / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
+    const d = Math.floor(diff / 86400000), h = Math.floor((diff % 86400000) / 3600000), m = Math.floor((diff % 3600000) / 60000);
     if (d > 0) return `${d}d ${h}h left`;
     if (h > 0) return `${h}h ${m}m left`;
     return `${m}m left`;
   }
 
   if (loading) return (
-    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
-      <p className="text-gray-400">Loading listing...</p>
+    <div className="min-h-screen bg-white flex items-center justify-center">
+      <p className="text-[#979797]">Loading listing...</p>
     </div>
   );
 
   if (!item) return (
-    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+    <div className="min-h-screen bg-white flex items-center justify-center">
       <div className="text-center">
         <div className="text-6xl mb-4">📦</div>
-        <h2 className="text-2xl font-bold text-white mb-2">Item not found</h2>
-        <p className="text-gray-400 mb-6">This listing may have been removed.</p>
-        <button onClick={() => router.push('/browse')} className="bg-violet-600 hover:bg-violet-700 text-white px-8 py-3 rounded-2xl font-medium">Back to Browse</button>
+        <h2 className="text-2xl font-bold text-[#111] mb-2">Item not found</h2>
+        <p className="text-[#979797] mb-6">This listing may have been removed.</p>
+        <button onClick={() => router.push('/browse')} className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full font-medium transition">Back to Browse</button>
       </div>
     </div>
   );
@@ -356,37 +339,36 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
   const descriptionParts = [item.description_part1, item.description_part2, item.description_part3, item.description_part4, item.description_part5];
 
   return (
-      <div className="min-h-screen bg-[#0a0a0a]">
-        <div className="py-12">
-        <div className="max-w-5xl mx-auto px-6">
+    <div className="min-h-screen bg-white">
+      <div className="max-w-5xl mx-auto px-6 py-8">
 
         {/* Top bar */}
-        <div className="flex items-center justify-between mb-6">
-          <button onClick={() => router.push('/browse')} className="text-gray-400 hover:text-white flex items-center gap-2">← Back to Browse</button>
+        <div className="flex items-center justify-between mb-8">
+          <button onClick={() => router.push('/browse')} className="text-[#979797] hover:text-[#4757bf] flex items-center gap-1 text-sm transition">
+            ← Back to Browse
+          </button>
           <div className="flex items-center gap-3">
-            {!isOwner && (
-              <button onClick={() => router.push('/notifications')} className="relative p-2 text-gray-400 hover:text-white">
-                <Bell size={20} />
-              </button>
-            )}
             {isOwner && !isEditing && (
               <>
                 <button onClick={() => { setIsEditing(true); setEditImagePreviews(item.images || []); setEditImageUrls(item.images || []); }}
-                  className="flex items-center gap-2 px-5 py-2 bg-[#111] border border-[#333] hover:border-violet-500 text-white rounded-2xl transition text-sm">
-                  <Pencil size={15} /> Edit
+                  className="flex items-center gap-2 px-4 py-2 border border-[#dedede] hover:border-[#4757bf] text-[#111] rounded-full transition text-sm">
+                  <Pencil size={14} /> Edit
                 </button>
-                <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-2 px-5 py-2 bg-[#111] border border-[#333] hover:border-red-500 text-red-400 rounded-2xl transition text-sm">
-                  <Trash2 size={15} /> Delete
+                <button onClick={() => setShowDeleteConfirm(true)}
+                  className="flex items-center gap-2 px-4 py-2 border border-[#dedede] hover:border-red-400 text-red-400 rounded-full transition text-sm">
+                  <Trash2 size={14} /> Delete
                 </button>
               </>
             )}
             {isOwner && isEditing && (
               <>
-                <button onClick={() => setIsEditing(false)} className="flex items-center gap-2 px-5 py-2 bg-[#111] border border-[#333] text-gray-400 rounded-2xl text-sm">
-                  <X size={15} /> Cancel
+                <button onClick={() => setIsEditing(false)}
+                  className="flex items-center gap-2 px-4 py-2 border border-[#dedede] text-[#979797] rounded-full text-sm">
+                  <X size={14} /> Cancel
                 </button>
-                <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-gray-600 text-white rounded-2xl text-sm">
-                  <Check size={15} /> {saving ? 'Saving...' : 'Save Changes'}
+                <button onClick={handleSave} disabled={saving}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white rounded-full text-sm transition">
+                  <Check size={14} /> {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </>
             )}
@@ -395,14 +377,14 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
 
         {/* Delete modal */}
         {showDeleteConfirm && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-            <div className="bg-[#111] border border-[#222] rounded-3xl p-10 max-w-md w-full mx-6 text-center">
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-3xl p-10 max-w-md w-full mx-6 text-center shadow-xl">
               <div className="text-5xl mb-4">🗑️</div>
-              <h2 className="text-2xl font-bold text-white mb-2">Delete Listing?</h2>
-              <p className="text-gray-400 mb-8">This action cannot be undone.</p>
+              <h2 className="text-2xl font-bold text-[#111] mb-2">Delete Listing?</h2>
+              <p className="text-[#979797] mb-8">This action cannot be undone.</p>
               <div className="flex gap-4 justify-center">
-                <button onClick={() => setShowDeleteConfirm(false)} className="px-8 py-3 border border-[#333] text-white rounded-2xl">Cancel</button>
-                <button onClick={handleDelete} disabled={deleting} className="px-8 py-3 bg-red-600 hover:bg-red-700 text-white rounded-2xl">
+                <button onClick={() => setShowDeleteConfirm(false)} className="px-8 py-3 border border-[#dedede] text-[#111] rounded-full">Cancel</button>
+                <button onClick={handleDelete} disabled={deleting} className="px-8 py-3 bg-red-500 hover:bg-red-600 text-white rounded-full transition">
                   {deleting ? 'Deleting...' : 'Yes, Delete'}
                 </button>
               </div>
@@ -412,37 +394,37 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
 
         {/* Offer modal */}
         {showOfferModal && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-            <div className="bg-[#111] border border-[#222] rounded-3xl p-10 max-w-md w-full mx-6">
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-3xl p-8 max-w-md w-full mx-6 shadow-xl">
               {offerSuccess ? (
                 <div className="text-center">
                   <div className="text-5xl mb-4">🤝</div>
-                  <h2 className="text-2xl font-bold text-white mb-2">Offer Sent!</h2>
-                  <p className="text-gray-400 mb-6">The seller will review your offer and get back to you.</p>
+                  <h2 className="text-2xl font-bold text-[#111] mb-2">Offer Sent!</h2>
+                  <p className="text-[#979797] mb-6">The seller will review your offer and get back to you.</p>
                   <button onClick={() => { setShowOfferModal(false); setOfferSuccess(false); setOfferAmount(''); setOfferMessage(''); }}
-                    className="bg-violet-600 hover:bg-violet-700 text-white px-8 py-3 rounded-2xl">Done</button>
+                    className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full transition">Done</button>
                 </div>
               ) : (
                 <>
                   <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold text-white">Make an Offer</h2>
-                    <button onClick={() => setShowOfferModal(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                    <h2 className="text-xl font-bold text-[#111]">Make an Offer</h2>
+                    <button onClick={() => setShowOfferModal(false)} className="text-[#979797] hover:text-[#111]"><X size={20} /></button>
                   </div>
-                  <p className="text-gray-400 text-sm mb-6">Seller's asking price: <span className="text-white font-semibold">R{(item.price / 100).toLocaleString()}</span></p>
+                  <p className="text-[#979797] text-sm mb-6">Asking price: <span className="text-[#111] font-semibold">R{(item.price / 100).toLocaleString()}</span></p>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm text-gray-400 mb-2">Your Offer (Rands)</label>
+                      <label className="block text-sm font-medium text-[#111] mb-1.5">Your Offer (Rands)</label>
                       <input type="number" value={offerAmount} onChange={(e) => setOfferAmount(e.target.value)}
-                        className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white" placeholder="e.g. 500" />
+                        className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]" placeholder="e.g. 500" />
                     </div>
                     <div>
-                      <label className="block text-sm text-gray-400 mb-2">Message (optional)</label>
+                      <label className="block text-sm font-medium text-[#111] mb-1.5">Message (optional)</label>
                       <textarea value={offerMessage} onChange={(e) => setOfferMessage(e.target.value)}
-                        className="w-full h-24 bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white resize-none"
+                        className="w-full h-24 bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] resize-none focus:outline-none focus:border-[#4757bf]"
                         placeholder="Why should the seller accept your offer?" />
                     </div>
                     <button onClick={handleSubmitOffer} disabled={submittingOffer || !offerAmount}
-                      className="w-full py-4 bg-violet-600 hover:bg-violet-700 disabled:bg-gray-600 text-white font-medium rounded-2xl">
+                      className="w-full py-3 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-medium rounded-full transition">
                       {submittingOffer ? 'Sending...' : 'Send Offer'}
                     </button>
                   </div>
@@ -454,44 +436,46 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
 
         {/* Bid modal */}
         {showBidModal && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-            <div className="bg-[#111] border border-[#222] rounded-3xl p-10 max-w-md w-full mx-6">
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-3xl p-8 max-w-md w-full mx-6 shadow-xl">
               {bidSuccess ? (
                 <div className="text-center">
                   <div className="text-5xl mb-4">🏆</div>
-                  <h2 className="text-2xl font-bold text-white mb-2">Bid Placed!</h2>
-                  <p className="text-gray-400 mb-6">You're in the running. Check back to see if you win.</p>
+                  <h2 className="text-2xl font-bold text-[#111] mb-2">Bid Placed!</h2>
+                  <p className="text-[#979797] mb-6">You&apos;re in the running. Check back to see if you win.</p>
                   <button onClick={() => { setShowBidModal(false); setBidSuccess(false); setBidAmount(''); }}
-                    className="bg-violet-600 hover:bg-violet-700 text-white px-8 py-3 rounded-2xl">Done</button>
+                    className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full transition">Done</button>
                 </div>
               ) : (
                 <>
                   <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold text-white">Place a Bid</h2>
-                    <button onClick={() => setShowBidModal(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                    <h2 className="text-xl font-bold text-[#111]">Place a Bid</h2>
+                    <button onClick={() => setShowBidModal(false)} className="text-[#979797] hover:text-[#111]"><X size={20} /></button>
                   </div>
-                  <div className="bg-[#1a1a1a] rounded-2xl p-4 mb-6 space-y-2">
+                  <div className="bg-[#f4f4f4] rounded-2xl p-4 mb-6 space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Starting price</span>
-                      <span className="text-white">R{(item.price / 100).toLocaleString()}</span>
+                      <span className="text-[#979797]">Starting price</span>
+                      <span className="text-[#111] font-medium">R{(item.price / 100).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Highest bid</span>
-                      <span className="text-violet-400 font-semibold">{highestBid ? `R${(highestBid / 100).toLocaleString()}` : 'No bids yet'}</span>
+                      <span className="text-[#979797]">Highest bid</span>
+                      <span className="text-[#4757bf] font-semibold">{highestBid ? `R${(highestBid / 100).toLocaleString()}` : 'No bids yet'}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Time left</span>
-                      <span className={auctionEnded ? 'text-red-400' : 'text-green-400'}>{timeLeft}</span>
-                    </div>
+                    {timeLeft && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[#979797]">Time left</span>
+                        <span className={auctionEnded ? 'text-red-500' : 'text-green-600'}>{timeLeft}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="mb-4">
-                    <label className="block text-sm text-gray-400 mb-2">Your Bid (Rands)</label>
+                    <label className="block text-sm font-medium text-[#111] mb-1.5">Your Bid (Rands)</label>
                     <input type="number" value={bidAmount} onChange={(e) => setBidAmount(e.target.value)}
-                      className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white"
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]"
                       placeholder={`Min: R${highestBid ? (highestBid / 100) + 1 : (item.price / 100) + 1}`} />
                   </div>
                   <button onClick={handleSubmitBid} disabled={submittingBid || !bidAmount || auctionEnded}
-                    className="w-full py-4 bg-violet-600 hover:bg-violet-700 disabled:bg-gray-600 text-white font-medium rounded-2xl">
+                    className="w-full py-3 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-medium rounded-full transition">
                     {auctionEnded ? 'Auction Ended' : submittingBid ? 'Placing Bid...' : 'Place Bid'}
                   </button>
                 </>
@@ -500,344 +484,448 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-          {/* Images */}
-        <div>
-          <div className="bg-[#111] border border-[#222] rounded-3xl overflow-hidden h-96 relative group">
-            {(isEditing ? editImagePreviews : item.images)?.length > 0 ? (
-              <img src={(isEditing ? editImagePreviews : item.images)[selectedImage]} alt={item.title} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-8xl text-gray-600">📦</div>
-            )}
+        {/* Main content grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
 
-            {/* Edit overlay — only visible when owner is in edit mode */}
-            {isOwner && isEditing && (
-              <>
-                <input type="file" accept="image/*" multiple onChange={handleEditImageChange} className="hidden" id="edit-upload" />
-                <label htmlFor="edit-upload"
-                  className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition cursor-pointer rounded-3xl">
-                  <div className="text-center">
-                    <div className="text-4xl mb-2">📷</div>
-                    <div className="text-white text-sm font-medium">{uploadingEdit ? 'Uploading...' : 'Change Photos'}</div>
+          {/* Images — sticky on desktop */}
+          <div className="lg:sticky lg:top-6">
+            <div
+              className={`bg-[#f4f4f4] rounded-3xl overflow-hidden aspect-square relative group ${!isEditing && item.images?.length > 0 ? 'cursor-zoom-in' : ''}`}
+              onClick={() => { if (!isEditing && item.images?.length > 0) setShowLightbox(true); }}
+            >
+              {(isEditing ? editImagePreviews : item.images)?.length > 0 ? (
+                <img
+                  src={(isEditing ? editImagePreviews : item.images)[selectedImage]}
+                  alt={item.title}
+                  className="w-full h-full object-contain transition-opacity duration-200"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-8xl">📦</div>
+              )}
+              {!isEditing && item.images?.length > 0 && (
+                <div className="absolute bottom-3 right-3 bg-black/40 text-white text-xs px-2.5 py-1 rounded-full opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                  Click to zoom
+                </div>
+              )}
+              {isOwner && isEditing && (
+                <>
+                  <input type="file" accept="image/*" multiple onChange={handleEditImageChange} className="hidden" id="edit-upload" />
+                  <label htmlFor="edit-upload"
+                    className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition cursor-pointer rounded-3xl">
+                    <div className="text-center">
+                      <div className="text-4xl mb-2">📷</div>
+                      <div className="text-white text-sm font-medium">{uploadingEdit ? 'Uploading...' : 'Change Photos'}</div>
+                    </div>
+                  </label>
+                </>
+              )}
+            </div>
+            {(isEditing ? editImagePreviews : item.images)?.length > 1 && (
+              <div className="flex gap-3 mt-4 flex-wrap">
+                {(isEditing ? editImagePreviews : item.images).map((src, i) => (
+                  <div key={i} className="relative group/thumb">
+                    <button
+                      onClick={() => setSelectedImage(i)}
+                      className={`w-16 h-16 rounded-xl overflow-hidden border-2 transition ${selectedImage === i ? 'border-[#4757bf]' : 'border-[#dedede] hover:border-[#4757bf]/50'}`}
+                    >
+                      <img src={src} alt="" className="w-full h-full object-contain bg-[#f4f4f4]" />
+                    </button>
+                    {isEditing && (
+                      <button onClick={() => removeEditImage(i)}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover/thumb:opacity-100 transition">
+                        <X size={12} />
+                      </button>
+                    )}
                   </div>
-                </label>
-              </>
+                ))}
+              </div>
             )}
           </div>
 
-          {/* Thumbnails */}
-          {(isEditing ? editImagePreviews : item.images)?.length > 1 && (
-            <div className="flex gap-3 mt-4 flex-wrap">
-              {(isEditing ? editImagePreviews : item.images).map((src, i) => (
-                <div key={i} className="relative group/thumb">
-                  <button onClick={() => setSelectedImage(i)}
-                    className={`w-20 h-20 rounded-xl overflow-hidden border-2 transition ${selectedImage === i ? 'border-violet-500' : 'border-[#333]'}`}>
-                    <img src={src} alt="" className="w-full h-full object-cover" />
-                  </button>
-                  {isEditing && (
-                    <button onClick={() => removeEditImage(i)}
-                      className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 opacity-0 group-hover/thumb:opacity-100 transition">
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-          {/* Right panel */}
-          <div>
-          {isEditing ? (
-            <div className="space-y-5">
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Title</label>
-                <input type="text" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                  className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-2">Category</label>
-                  <select value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value, subcategory: '' })}
-                    className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white">
-                    {ALL_CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-2">Subcategory</label>
-                  <select value={editForm.subcategory} onChange={(e) => setEditForm({ ...editForm, subcategory: e.target.value })}
-                    className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white">
-                    <option value="">Select...</option>
-                    {editForm.category && SUBCATEGORIES[editForm.category as ListingCategory]?.map(s => <option key={s}>{s}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-2">Size</label>
-                  <select value={editForm.size} onChange={(e) => setEditForm({ ...editForm, size: e.target.value })}
-                    className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white">
-                    <option value="">N/A</option>
-                    <optgroup label="Clothing">{CLOTHING_SIZES.map(s => <option key={s}>{s}</option>)}</optgroup>
-                    <optgroup label="Shoes">{SHOE_SIZES.map(s => <option key={`shoe-${s}`} value={`Shoe ${s}`}>Shoe {s}</option>)}</optgroup>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-2">Gender</label>
-                  <select value={editForm.gender} onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}
-                    className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white">
-                    <option value="">N/A</option>
-                    <option value="boys">Boys</option>
-                    <option value="girls">Girls</option>
-                    <option value="unisex">Unisex</option>
-                  </select>
-                </div>
-              </div>
-
-              {editForm.category === 'Books & Stationery' && (
-                <div>
-                  <label className="block text-sm text-gray-400 mb-2">Grade</label>
-                  <select value={editForm.grade} onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
-                    className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white">
-                    <option value="">Select grade...</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
-                  </select>
-                </div>
-              )}
-
-              {/* School-specific toggle + picker */}
-              {SCHOOL_SPECIFIC_CATEGORIES.includes(editForm.category as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) && (
-                <div>
-                  <label className="flex items-center gap-3 cursor-pointer mb-3">
-                    <input type="checkbox" checked={editForm.is_school_specific}
-                      onChange={e => setEditForm({ ...editForm, is_school_specific: e.target.checked })}
-                      className="w-4 h-4 accent-violet-600" />
-                    <span className="text-sm text-gray-300">Link to a specific school</span>
-                  </label>
-                  {editForm.is_school_specific && (
-                    <div className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-xl p-4 space-y-3">
-                      {editSchoolId && !showSchoolPicker && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-violet-300 text-sm">🏫 {editSchoolName || 'School linked'}</span>
-                          <button onClick={() => setShowSchoolPicker(true)} className="text-xs text-gray-500 hover:text-white">Change</button>
-                        </div>
-                      )}
-                      {(!editSchoolId || showSchoolPicker) && <>
-                        <select className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-white text-sm"
-                          value={editProvince} onChange={e => { setEditProvince(e.target.value); setEditSchoolSearch(''); }}>
-                          <option value="">Select province...</option>
-                          {SA_PROVINCES.map(p => <option key={p}>{p}</option>)}
-                        </select>
-                        {editProvince && <>
-                          <input className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-white text-sm"
-                            value={editSchoolSearch} onChange={e => setEditSchoolSearch(e.target.value)} placeholder="Search school..." />
-                          <div className="max-h-40 overflow-y-auto border border-[#333] rounded-xl">
-                            {loadingEditSchools
-                              ? <p className="text-gray-500 text-center py-3 text-sm">Loading...</p>
-                              : editSchools.filter(s => s.name.toLowerCase().includes(editSchoolSearch.toLowerCase())).map(school => (
-                                <div key={school.id} onClick={() => { setEditSchoolId(school.id); setEditSchoolName(school.name); setShowSchoolPicker(false); }}
-                                  className="px-4 py-2.5 cursor-pointer hover:bg-[#1a1a1a] border-b border-[#222] text-sm text-white">
-                                  {school.name} <span className="text-gray-500 text-xs">· {school.city}</span>
-                                </div>
-                              ))
-                            }
-                          </div>
-                        </>}
-                      </>}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">
-                  {editForm.listing_type === 'best_bids' ? 'Starting Price (Rands)' : 'Price (Rands)'}
-                </label>
-                <input type="number" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
-                  className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white" />
-              </div>
-
-              {/* Listing type */}
-              <div>
-                <label className="block text-sm text-gray-400 mb-3">Listing Type</label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { value: 'buy_now', label: 'Buy Now', emoji: '⚡' },
-                    { value: 'make_offer', label: 'Make Offer', emoji: '🤝' },
-                    { value: 'best_bids', label: 'Best Bids', emoji: '🏆' },
-                  ].map((type) => (
-                    <button key={type.value} type="button"
-                      onClick={() => setEditForm({ ...editForm, listing_type: type.value })}
-                      className={`p-4 rounded-2xl border-2 text-center transition ${
-                        editForm.listing_type === type.value
-                          ? 'border-violet-500 bg-violet-500/10'
-                          : 'border-[#333] bg-[#1a1a1a] hover:border-[#555]'
-                      }`}>
-                      <div className="text-xl mb-1">{type.emoji}</div>
-                      <div className="text-white text-xs font-medium">{type.label}</div>
+          {/* Lightbox */}
+          {showLightbox && (
+            <div
+              className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+              onClick={() => setShowLightbox(false)}
+            >
+              <button
+                className="absolute top-4 right-4 text-white/70 hover:text-white transition"
+                onClick={() => setShowLightbox(false)}
+              >
+                <X size={28} />
+              </button>
+              <img
+                src={item.images[selectedImage]}
+                alt={item.title}
+                className="max-w-full max-h-full object-contain rounded-xl"
+                onClick={e => e.stopPropagation()}
+              />
+              {item.images.length > 1 && (
+                <div className="absolute bottom-6 flex gap-3">
+                  {item.images.map((src, i) => (
+                    <button
+                      key={i}
+                      onClick={e => { e.stopPropagation(); setSelectedImage(i); }}
+                      className={`w-12 h-12 rounded-lg overflow-hidden border-2 transition ${selectedImage === i ? 'border-white' : 'border-white/30'}`}
+                    >
+                      <img src={src} alt="" className="w-full h-full object-contain bg-black" />
                     </button>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
 
-                {editForm.listing_type === 'best_bids' && (
-                  <div className="mt-3">
-                    <label className="block text-sm text-gray-400 mb-2">Auction Duration</label>
-                    <select value={editForm.auction_days} onChange={(e) => setEditForm({ ...editForm, auction_days: e.target.value })}
-                      className="w-full bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white">
-                      <option value="1">1 day</option>
-                      <option value="3">3 days</option>
-                      <option value="7">7 days</option>
-                      <option value="14">14 days</option>
+          {/* Right panel */}
+          <div className="flex flex-col gap-5">
+            {isEditing ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-[#111] mb-1.5">Title</label>
+                  <input type="text" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-[#111] mb-1.5">Category</label>
+                    <select value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value, subcategory: '' })}
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none">
+                      {ALL_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#111] mb-1.5">Subcategory</label>
+                    <select value={editForm.subcategory} onChange={(e) => setEditForm({ ...editForm, subcategory: e.target.value })}
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none">
+                      <option value="">Select...</option>
+                      {editForm.category && SUBCATEGORIES[editForm.category as ListingCategory]?.map(s => <option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-[#111] mb-1.5">Size</label>
+                    <select value={editForm.size} onChange={(e) => setEditForm({ ...editForm, size: e.target.value })}
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none">
+                      <option value="">N/A</option>
+                      <optgroup label="Clothing">{CLOTHING_SIZES.map(s => <option key={s}>{s}</option>)}</optgroup>
+                      <optgroup label="Shoes">{SHOE_SIZES.map(s => <option key={`shoe-${s}`} value={`Shoe ${s}`}>Shoe {s}</option>)}</optgroup>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#111] mb-1.5">Gender</label>
+                    <select value={editForm.gender} onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none">
+                      <option value="">N/A</option>
+                      <option value="boys">Boys</option>
+                      <option value="girls">Girls</option>
+                      <option value="unisex">Unisex</option>
+                    </select>
+                  </div>
+                </div>
+                {editForm.category === 'Books & Stationery' && (
+                  <div>
+                    <label className="block text-sm font-medium text-[#111] mb-1.5">Grade</label>
+                    <select value={editForm.grade} onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none">
+                      <option value="">Select grade...</option>
+                      {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
                     </select>
                   </div>
                 )}
+                {SCHOOL_SPECIFIC_CATEGORIES.includes(editForm.category as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) && (
+                  <div>
+                    <label className="flex items-center gap-3 cursor-pointer mb-3">
+                      <input type="checkbox" checked={editForm.is_school_specific}
+                        onChange={e => setEditForm({ ...editForm, is_school_specific: e.target.checked })}
+                        className="w-4 h-4 accent-[#4757bf]" />
+                      <span className="text-sm text-[#111]">Link to a specific school</span>
+                    </label>
+                    {editForm.is_school_specific && (
+                      <div className="bg-[#f4f4f4] border border-[#dedede] rounded-xl p-4 space-y-3">
+                        {editSchoolId && !showSchoolPicker && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#4757bf] text-sm">🏫 {editSchoolName || 'School linked'}</span>
+                            <button onClick={() => setShowSchoolPicker(true)} className="text-xs text-[#979797] hover:text-[#111]">Change</button>
+                          </div>
+                        )}
+                        {(!editSchoolId || showSchoolPicker) && <>
+                          <select className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none"
+                            value={editProvince} onChange={e => { setEditProvince(e.target.value); setEditSchoolSearch(''); }}>
+                            <option value="">Select province...</option>
+                            {SA_PROVINCES.map(p => <option key={p}>{p}</option>)}
+                          </select>
+                          {editProvince && <>
+                            <input className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none"
+                              value={editSchoolSearch} onChange={e => setEditSchoolSearch(e.target.value)} placeholder="Search school..." />
+                            <div className="max-h-40 overflow-y-auto border border-[#dedede] rounded-xl bg-white">
+                              {loadingEditSchools
+                                ? <p className="text-[#979797] text-center py-3 text-sm">Loading...</p>
+                                : editSchools.filter(s => s.name.toLowerCase().includes(editSchoolSearch.toLowerCase())).map(school => (
+                                  <div key={school.id} onClick={() => { setEditSchoolId(school.id); setEditSchoolName(school.name); setShowSchoolPicker(false); }}
+                                    className="px-4 py-2.5 cursor-pointer hover:bg-[#f4f4f4] border-b border-[#dedede] text-sm text-[#111]">
+                                    {school.name} <span className="text-[#979797] text-xs">· {school.city}</span>
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          </>}
+                        </>}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-[#111] mb-1.5">Price (Rands)</label>
+                  <input type="number" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
+                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#111] mb-2">Listing Type</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { value: 'buy_now', label: 'Buy Now', emoji: '⚡' },
+                      { value: 'make_offer', label: 'Make Offer', emoji: '🤝' },
+                      { value: 'best_bids', label: 'Best Bids', emoji: '🏆' },
+                    ].map((type) => (
+                      <button key={type.value} type="button"
+                        onClick={() => setEditForm({ ...editForm, listing_type: type.value })}
+                        className={`p-3 rounded-xl border-2 text-center transition ${editForm.listing_type === type.value ? 'border-[#4757bf] bg-[#fff0ee]' : 'border-[#dedede] bg-[#f4f4f4] hover:border-[#4757bf]/50'}`}>
+                        <div className="text-xl mb-1">{type.emoji}</div>
+                        <div className="text-[#111] text-xs font-medium">{type.label}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {editForm.listing_type === 'best_bids' && (
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-[#111] mb-1.5">Auction Duration</label>
+                      <select value={editForm.auction_days} onChange={(e) => setEditForm({ ...editForm, auction_days: e.target.value })}
+                        className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none">
+                        <option value="1">1 day</option>
+                        <option value="3">3 days</option>
+                        <option value="7">7 days</option>
+                        <option value="14">14 days</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
             ) : (
               <>
-                {/* Listing type badge */}
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="text-xs uppercase tracking-widest text-violet-400">{item.category}</div>
-                  <div className={`text-xs px-3 py-1 rounded-full font-medium ${
-                    item.listing_type === 'buy_now' ? 'bg-blue-500/20 text-blue-400' :
-                    item.listing_type === 'make_offer' ? 'bg-green-500/20 text-green-400' :
-                    'bg-orange-500/20 text-orange-400'
+                {/* Category + listing type */}
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-xs font-semibold uppercase tracking-widest text-[#979797]">{item.category}</span>
+                  <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                    item.listing_type === 'buy_now' ? 'bg-blue-50 text-blue-600' :
+                    item.listing_type === 'make_offer' ? 'bg-green-50 text-green-600' :
+                    'bg-orange-50 text-orange-600'
                   }`}>
                     {item.listing_type === 'buy_now' ? '⚡ Buy Now' : item.listing_type === 'make_offer' ? '🤝 Make Offer' : '🏆 Best Bids'}
-                  </div>
+                  </span>
                 </div>
 
-                <h1 className="text-3xl font-bold text-white mb-4">{item.title}</h1>
+                <h1 className="text-3xl font-bold text-[#111] mb-4">{item.title}</h1>
+
+                {/* Seller info bar — location + school + sales count, no personal details */}
+                <div className="flex flex-wrap items-center gap-4 text-sm text-[#979797]">
+                  {sellerProvince && (
+                    <span className="flex items-center gap-1.5">
+                      <MapPin size={13} strokeWidth={2} className="text-[#4757bf]" />
+                      {sellerProvince}
+                    </span>
+                  )}
+                  {viewSchoolName && (
+                    <span className="flex items-center gap-1.5">
+                      <SchoolIcon size={13} strokeWidth={2} className="text-[#4757bf]" />
+                      {viewSchoolName}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1.5">
+                    <ShoppingBag size={13} strokeWidth={2} className="text-[#4757bf]" />
+                    {sellerSoldCount === 0 ? 'New seller' : `${sellerSoldCount} sold`}
+                  </span>
+                  <span className="flex items-center gap-1.5 ml-auto">
+                    <Heart size={13} strokeWidth={2} className="text-[#979797]" />
+                    {likeCount} {likeCount === 1 ? 'like' : 'likes'}
+                  </span>
+                </div>
 
                 {item.listing_type === 'best_bids' ? (
-                  <div className="bg-[#1a1a1a] rounded-2xl p-4 mb-6 space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-400 text-sm">Starting price</span>
-                      <span className="text-white font-semibold">R{(item.price / 100).toLocaleString()}</span>
+                  <div className="bg-[#f4f4f4] rounded-2xl p-4 mb-6 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-[#979797]">Starting price</span>
+                      <span className="text-[#111] font-semibold">R{(item.price / 100).toLocaleString()}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400 text-sm">Highest bid</span>
-                      <span className="text-violet-400 font-bold text-lg">{highestBid ? `R${(highestBid / 100).toLocaleString()}` : 'No bids yet'}</span>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-[#979797]">Highest bid</span>
+                      <span className="text-[#4757bf] font-bold text-lg">{highestBid ? `R${(highestBid / 100).toLocaleString()}` : 'No bids yet'}</span>
                     </div>
                     {timeLeft && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-400 text-sm">Time left</span>
-                        <span className={`font-medium text-sm ${auctionEnded ? 'text-red-400' : 'text-green-400'}`}>{timeLeft}</span>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[#979797]">Time left</span>
+                        <span className={auctionEnded ? 'text-red-500' : 'text-green-600'}>{timeLeft}</span>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="text-4xl font-bold text-white mb-6">R{(item.price / 100).toLocaleString()}</div>
+                  <div className="text-4xl font-bold text-[#4757bf] mb-6">R{(item.price / 100).toLocaleString()}</div>
                 )}
 
-                {/* Buyer actions */}
-                {!isOwner && isAgeVerified && (
-                  <div className="space-y-3">
-                    {!isOwner && !isAgeVerified && (
-                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-5 text-center">
-                        <p className="text-yellow-400 font-medium">🔞 You must be 18+ to buy or make offers.</p>
-                        <p className="text-gray-400 text-sm mt-1">You can browse but cannot purchase on this account.</p>
+                {/* Buyer actions — shown to all non-owners */}
+                {!isOwner && (
+                  <div className="flex flex-col gap-3">
+                    {!isLoggedIn && (
+                      <div className="bg-[#f4f4f4] border border-[#dedede] rounded-2xl p-5 text-center">
+                        <p className="text-[#111] font-medium mb-2">Sign in to buy or make offers</p>
+                        <button onClick={() => router.push('/')} className="px-6 py-2 bg-[#4757bf] hover:bg-[#3a48a8] text-white rounded-full text-sm font-medium transition">Sign In</button>
                       </div>
                     )}
-                    {item.listing_type === 'buy_now' && (
-                      <button onClick={handleBuyNow} className="w-full py-4 bg-violet-600 hover:bg-violet-700 text-white font-medium rounded-2xl transition">
-                        ⚡ Buy Now — R{(item.price / 100).toLocaleString()}
-                      </button>
+                    {isLoggedIn && !isAgeVerified && (
+                      <div className="bg-[#fffbeb] border border-[#fde68a] rounded-2xl p-5 text-center">
+                        <p className="text-yellow-700 font-medium">🔞 You must be 18+ to buy or make offers.</p>
+                        <p className="text-yellow-600 text-sm mt-1">You can browse but cannot purchase on this account.</p>
+                      </div>
                     )}
-                    {item.listing_type === 'make_offer' && (
-                      <button onClick={() => setShowOfferModal(true)} className="w-full py-4 bg-violet-600 hover:bg-violet-700 text-white font-medium rounded-2xl transition">
-                        🤝 Make an Offer
-                      </button>
+                    {isLoggedIn && isAgeVerified && (
+                      <>
+                        {item.listing_type === 'buy_now' && (
+                          <button onClick={handleBuyNow}
+                            className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] text-white font-semibold rounded-full transition">
+                            ⚡ Buy Now — R{(item.price / 100).toLocaleString()}
+                          </button>
+                        )}
+                        {item.listing_type === 'make_offer' && (
+                          <button onClick={() => setShowOfferModal(true)}
+                            className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] text-white font-semibold rounded-full transition">
+                            🤝 Make an Offer
+                          </button>
+                        )}
+                        {item.listing_type === 'best_bids' && (
+                          <button onClick={() => setShowBidModal(true)} disabled={auctionEnded}
+                            className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-semibold rounded-full transition">
+                            {auctionEnded ? 'Auction Ended' : userHasBid ? '🏆 Update My Bid' : '🏆 Place a Bid'}
+                          </button>
+                        )}
+                        <button
+                          onClick={toggleLike}
+                          className={`w-full py-4 border rounded-full font-medium transition flex items-center justify-center gap-2 ${
+                            liked
+                              ? 'border-[#4757bf] bg-[#eef0fb] text-[#4757bf]'
+                              : 'border-[#dedede] hover:border-[#4757bf] text-[#111]'
+                          }`}
+                        >
+                          <Heart size={16} strokeWidth={2} className={liked ? 'fill-[#4757bf]' : ''} />
+                          {liked ? 'Saved' : 'Save Listing'}
+                        </button>
+                      </>
                     )}
-                    {item.listing_type === 'best_bids' && (
-                      <button onClick={() => setShowBidModal(true)} disabled={auctionEnded}
-                        className="w-full py-4 bg-violet-600 hover:bg-violet-700 disabled:bg-gray-600 text-white font-medium rounded-2xl transition">
-                        {auctionEnded ? 'Auction Ended' : userHasBid ? '🏆 Update My Bid' : '🏆 Place a Bid'}
-                      </button>
-                    )}
-                    <button className="w-full py-4 border border-[#333] hover:border-violet-500 text-white font-medium rounded-2xl transition">
-                      Save Listing
-                    </button>
                   </div>
                 )}
 
-                {/* Seller summary */}
-                {isOwner && item.listing_type !== 'buy_now' && (
-                  <div className="grid grid-cols-2 gap-4 mt-2">
-                    {item.listing_type === 'make_offer' && (
-                      <div className="bg-[#1a1a1a] rounded-2xl p-4 text-center col-span-2">
-                        <div className="text-2xl font-bold text-white">{offers.length}</div>
-                        <div className="text-gray-400 text-sm">Offers</div>
-                      </div>
+                {/* Owner status — compact pill + offer/bid count if applicable */}
+                {isOwner && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f0fdf4] border border-[#bbf7d0] text-green-700 text-xs font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                      Live
+                    </span>
+                    {item.listing_type === 'make_offer' && offers.length > 0 && (
+                      <span className="text-sm text-[#979797]">{offers.length} offer{offers.length !== 1 ? 's' : ''} received</span>
                     )}
-                    {item.listing_type === 'best_bids' && (
-                      <div className="bg-[#1a1a1a] rounded-2xl p-4 text-center col-span-2">
-                        <div className="text-2xl font-bold text-white">{bids.length}</div>
-                        <div className="text-gray-400 text-sm">Bids</div>
-                      </div>
+                    {item.listing_type === 'best_bids' && bids.length > 0 && (
+                      <span className="text-sm text-[#979797]">{bids.length} bid{bids.length !== 1 ? 's' : ''} placed</span>
                     )}
                   </div>
+                )}
+
+                {/* Item tags */}
+                {(item.size || item.gender || item.grade || item.subcategory || item.condition) && (
+                  <>
+                    <hr className="border-[#dedede]" />
+                    <div className="flex flex-wrap gap-2">
+                      {item.size && (
+                        <span className="px-3 py-1 rounded-full border border-[#dedede] text-[#111] text-xs font-medium">Size: {item.size}</span>
+                      )}
+                      {item.condition && (
+                        <span className="px-3 py-1 rounded-full border border-[#dedede] text-[#111] text-xs font-medium capitalize">
+                          {item.condition.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                      {item.gender && (
+                        <span className="px-3 py-1 rounded-full border border-[#dedede] text-[#111] text-xs font-medium capitalize">{item.gender}</span>
+                      )}
+                      {item.grade && (
+                        <span className="px-3 py-1 rounded-full border border-[#dedede] text-[#111] text-xs font-medium">Grade {item.grade}</span>
+                      )}
+                      {item.subcategory && (
+                        <span className="px-3 py-1 rounded-full border border-[#dedede] text-[#979797] text-xs font-medium">{item.subcategory}</span>
+                      )}
+                      <span className="px-3 py-1 rounded-full border border-[#dedede] text-[#979797] text-xs font-medium">{item.category}</span>
+                    </div>
+                  </>
+                )}
+
+                {/* Description sections — inline in right panel */}
+                {descriptionParts.some(Boolean) && (
+                  <>
+                    <hr className="border-[#dedede]" />
+                    <div className="space-y-4">
+                      {descriptionParts.map((part, i) =>
+                        part ? (
+                          <div key={i}>
+                            <h3 className="text-xs uppercase tracking-widest text-[#979797] font-semibold mb-1.5">{DESCRIPTION_LABELS[i]}</h3>
+                            <p className="text-[#111] text-sm leading-relaxed">{part}</p>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </>
                 )}
               </>
             )}
           </div>
         </div>
 
-        {/* Description sections */}
-        <div className="mt-12 space-y-6">
-          {isEditing ? (
-            ['part1', 'part2', 'part3', 'part4', 'part5'].map((key, i) => (
-              <div key={key} className="bg-[#111] border border-[#222] rounded-3xl p-8">
-                <label className="block text-sm uppercase tracking-widest text-violet-400 mb-3">{DESCRIPTION_LABELS[i]}</label>
+        {/* Description fields — only shown in edit mode (view mode shows these inline in right panel) */}
+        {isEditing && (
+          <div className="mt-12 space-y-4">
+            {['part1', 'part2', 'part3', 'part4', 'part5'].map((key, i) => (
+              <div key={key} className="border border-[#dedede] rounded-2xl p-6">
+                <label className="block text-xs uppercase tracking-widest text-[#979797] font-semibold mb-3">{DESCRIPTION_LABELS[i]}</label>
                 <textarea value={String(editForm[key as keyof typeof editForm])}
                   onChange={(e) => setEditForm({ ...editForm, [key]: e.target.value })}
-                  className="w-full h-28 bg-[#1a1a1a] border border-[#333] rounded-2xl px-5 py-4 text-white resize-none" />
+                  className="w-full h-24 bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] resize-none focus:outline-none focus:border-[#4757bf]" />
               </div>
-            ))
-          ) : (
-            descriptionParts.map((part, i) =>
-              part ? (
-                <div key={i} className="bg-[#111] border border-[#222] rounded-3xl p-8">
-                  <h3 className="text-sm uppercase tracking-widest text-violet-400 mb-3">{DESCRIPTION_LABELS[i]}</h3>
-                  <p className="text-gray-300 leading-relaxed">{part}</p>
-                </div>
-              ) : null
-            )
-          )}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Seller offers/bids panel */}
         {isOwner && (item.listing_type === 'make_offer' || item.listing_type === 'best_bids') && (
-          <div className="mt-12 bg-[#111] border border-[#222] rounded-3xl p-8">
-            <h2 className="text-xl font-bold text-white mb-6">
+          <div className="mt-10 border border-[#dedede] rounded-2xl p-8">
+            <h2 className="text-lg font-bold text-[#111] mb-6">
               {item.listing_type === 'make_offer' ? '📬 Incoming Offers' : '🏆 Bid Leaderboard'}
             </h2>
-
             {item.listing_type === 'make_offer' && (
-              offers.length === 0 ? (
-                <p className="text-gray-400">No offers yet.</p>
-              ) : (
-                <div className="space-y-4">
+              offers.length === 0 ? <p className="text-[#979797]">No offers yet.</p> : (
+                <div className="space-y-3">
                   {offers.map((offer) => (
-                    <div key={offer.id} className="bg-[#1a1a1a] rounded-2xl p-6 flex items-center justify-between gap-4">
+                    <div key={offer.id} className="bg-[#f4f4f4] rounded-2xl p-5 flex items-center justify-between gap-4">
                       <div>
-                        <div className="text-white font-bold text-xl">R{(offer.amount / 100).toLocaleString()}</div>
-                        {offer.message && <p className="text-gray-400 text-sm mt-1">"{offer.message}"</p>}
-                        <div className="text-gray-500 text-xs mt-1">{new Date(offer.created_at).toLocaleDateString()}</div>
+                        <div className="text-[#111] font-bold text-xl">R{(offer.amount / 100).toLocaleString()}</div>
+                        {offer.message && <p className="text-[#979797] text-sm mt-1">&quot;{offer.message}&quot;</p>}
+                        <div className="text-[#979797] text-xs mt-1">{new Date(offer.created_at).toLocaleDateString()}</div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         {offer.status === 'pending' ? (
                           <>
                             <button onClick={() => handleOfferAction(offer.id, 'accepted', offer.buyer_id)}
-                              className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm">Accept</button>
+                              className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-full text-sm transition">Accept</button>
                             <button onClick={() => handleOfferAction(offer.id, 'declined', offer.buyer_id)}
-                              className="px-5 py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl text-sm">Decline</button>
+                              className="px-4 py-2 border border-red-300 text-red-500 hover:bg-red-50 rounded-full text-sm transition">Decline</button>
                           </>
                         ) : (
-                          <span className={`text-sm px-4 py-2 rounded-xl font-medium ${
-                            offer.status === 'accepted' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                          }`}>
+                          <span className={`text-sm px-4 py-2 rounded-full font-medium ${offer.status === 'accepted' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
                             {offer.status === 'accepted' ? '✓ Accepted' : '✗ Declined'}
                           </span>
                         )}
@@ -847,24 +935,19 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
                 </div>
               )
             )}
-
             {item.listing_type === 'best_bids' && (
-              bids.length === 0 ? (
-                <p className="text-gray-400">No bids yet.</p>
-              ) : (
+              bids.length === 0 ? <p className="text-[#979797]">No bids yet.</p> : (
                 <div className="space-y-3">
                   {bids.map((bid, i) => (
-                    <div key={bid.id} className={`bg-[#1a1a1a] rounded-2xl p-5 flex items-center justify-between ${i === 0 ? 'border border-violet-500/50' : ''}`}>
+                    <div key={bid.id} className={`bg-[#f4f4f4] rounded-2xl p-5 flex items-center justify-between ${i === 0 ? 'border-2 border-[#4757bf]' : ''}`}>
                       <div className="flex items-center gap-4">
-                        <div className={`text-lg font-bold w-8 ${i === 0 ? 'text-violet-400' : 'text-gray-500'}`}>#{i + 1}</div>
+                        <div className={`text-lg font-bold w-8 ${i === 0 ? 'text-[#4757bf]' : 'text-[#979797]'}`}>#{i + 1}</div>
                         <div>
-                          <div className={`font-bold text-xl ${i === 0 ? 'text-white' : 'text-gray-300'}`}>
-                            R{(bid.amount / 100).toLocaleString()}
-                          </div>
-                          <div className="text-gray-500 text-xs">{new Date(bid.created_at).toLocaleDateString()}</div>
+                          <div className="font-bold text-xl text-[#111]">R{(bid.amount / 100).toLocaleString()}</div>
+                          <div className="text-[#979797] text-xs">{new Date(bid.created_at).toLocaleDateString()}</div>
                         </div>
                       </div>
-                      {i === 0 && <span className="text-xs bg-violet-500/20 text-violet-400 px-3 py-1 rounded-full">🏆 Leading</span>}
+                      {i === 0 && <span className="text-xs bg-[#fff0ee] text-[#4757bf] px-3 py-1 rounded-full font-medium">🏆 Leading</span>}
                     </div>
                   ))}
                 </div>
@@ -873,7 +956,9 @@ const auctionEndsAt = editForm.listing_type === 'best_bids'
           </div>
         )}
       </div>
-      </div>
     </div>
   );
 }
+
+// Suppress unused import warning — LISTING_CONDITIONS is available for future use
+void LISTING_CONDITIONS;

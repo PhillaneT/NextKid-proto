@@ -1,7 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 
-// Simple emoji icons avoid SF Symbol type constraints across SDK versions
 function Icon({ emoji }: { emoji: string }) {
   return <Text style={{ fontSize: 20 }}>{emoji}</Text>;
 }
@@ -11,9 +10,14 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: '#111', borderTopColor: '#222' },
-        tabBarActiveTintColor: '#a855f7',
-        tabBarInactiveTintColor: '#555',
+        tabBarStyle: {
+          backgroundColor: '#ffffff',
+          borderTopColor: '#dedede',
+          borderTopWidth: 1,
+        },
+        tabBarActiveTintColor: '#4757bf',
+        tabBarInactiveTintColor: '#979797',
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
     >
       <Tabs.Screen

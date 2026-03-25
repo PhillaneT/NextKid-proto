@@ -13,7 +13,10 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "NextKid uses your location to show listings from your area and school."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -32,7 +35,10 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      ["expo-location", {
+        "locationWhenInUsePermission": "NextKid uses your location to show listings from your area and school."
+      }]
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,219 +1,426 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import type { School } from '@nextkid/shared'
 import { SA_PROVINCES } from '@nextkid/shared'
 
-const input: React.CSSProperties = {
-  width: '100%', padding: '12px', borderRadius: '8px',
-  background: '#2a2a2a', border: '1px solid #444',
-  color: '#fff', fontSize: '14px', boxSizing: 'border-box',
+interface CityOption   { id: string; name: string }
+interface SuburbOption { id: string; name: string }
+interface SchoolOption { id: string; name: string; type: string; city_name: string }
+interface SuburbSearchResult { id: string; name: string; city_id: string; city_name: string; province_code: string; postal_code?: string }
+
+// ── Design tokens (match globals.css) ────────────────────────────────────────
+const BLUE    = '#4757bf'
+const BORDER  = '#dedede'
+const SURFACE = '#f4f4f4'
+const TEXT    = '#111111'
+const MUTED   = '#979797'
+
+const s = {
+  page:  { minHeight: '100vh', background: '#fff', fontFamily: "'Roboto', system-ui, sans-serif" } as const,
+  wrap:  { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 57px)', padding: '24px' } as const,
+  card:  { background: '#fff', border: `1px solid ${BORDER}`, borderRadius: '16px', padding: '40px', width: '100%', maxWidth: '480px', boxShadow: '0 4px 24px rgba(0,0,0,0.06)' } as const,
+  label: { color: MUTED, fontSize: '13px', display: 'block', marginBottom: '6px', fontWeight: '500' } as const,
+  input: { width: '100%', padding: '13px', borderRadius: '10px', background: SURFACE, border: `1px solid ${BORDER}`, color: TEXT, fontSize: '14px', boxSizing: 'border-box', outline: 'none' } as const,
+  select: { width: '100%', padding: '13px', borderRadius: '10px', background: SURFACE, border: `1px solid ${BORDER}`, color: TEXT, fontSize: '14px', boxSizing: 'border-box', cursor: 'pointer', appearance: 'auto' } as const,
+  selectDisabled: { width: '100%', padding: '13px', borderRadius: '10px', background: '#fafafa', border: `1px solid ${BORDER}`, color: MUTED, fontSize: '14px', boxSizing: 'border-box', cursor: 'not-allowed' } as const,
 }
-const card: React.CSSProperties = {
-  background: '#1a1a1a', border: '1px solid #333',
-  borderRadius: '12px', padding: '40px', width: '100%', maxWidth: '480px',
-}
+
 const btn = (active: boolean): React.CSSProperties => ({
-  padding: '13px', borderRadius: '8px', border: 'none', fontSize: '15px',
-  fontWeight: '600', cursor: active ? 'pointer' : 'not-allowed',
-  background: active ? '#7c3aed' : '#333', color: active ? '#fff' : '#666',
+  padding: '14px', borderRadius: '30px', border: 'none', fontSize: '15px',
+  fontWeight: '700', cursor: active ? 'pointer' : 'not-allowed',
+  background: active ? BLUE : BORDER, color: active ? '#fff' : MUTED,
+  transition: 'background 0.15s',
 })
 
 function NavBar() {
   return (
-    <div style={{ background: '#111', borderBottom: '1px solid #222', padding: '16px 32px', display: 'flex', alignItems: 'center' }}>
-      <i className="fa-solid fa-paper-plane" style={{ color: 'rgb(228,37,205)', fontSize: '18px', marginRight: '8px' }} />
-      <span style={{ color: '#fff', fontWeight: '700', fontSize: '20px' }}>NextKid</span>
+    <div style={{ background: '#fff', borderBottom: `1px solid ${BORDER}`, padding: '16px 32px', display: 'flex', alignItems: 'center' }}>
+      <span style={{ color: BLUE, fontWeight: '800', fontSize: '20px' }}>NextKid</span>
     </div>
   )
 }
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const [step, setStep] = useState(1)
   const TOTAL_STEPS = 3
+
+  const [step, setStep]           = useState(1)
+  const [userId, setUserId]       = useState('')
+  const [userEmail, setUserEmail] = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   // Step 1
   const [fullName, setFullName] = useState('')
 
   // Step 2
   const [dob, setDob] = useState('')
-  const [ageError, setAgeError] = useState('')
 
-  // Step 3 — school picker
-  const [province, setProvince] = useState('')
-  const [schools, setSchools] = useState<School[]>([])
+  // Step 3 — location cascade
+  const [province, setProvince]     = useState('')
+  const [cities, setCities]         = useState<CityOption[]>([])
+  const [cityId, setCityId]         = useState('')
+  const [cityName, setCityName]     = useState('')
+  const [suburbs, setSuburbs]       = useState<SuburbOption[]>([])
+  const [suburbId, setSuburbId]     = useState('')
+  const [suburbName, setSuburbName] = useState('')
+  const [schools, setSchools]       = useState<SchoolOption[]>([])
   const [schoolSearch, setSchoolSearch] = useState('')
-  const [selectedSchools, setSelectedSchools] = useState<School[]>([])
-  const [loadingSchools, setLoadingSchools] = useState(false)
+  const [selectedSchool, setSelectedSchool] = useState<SchoolOption | null>(null)
 
-  const [userId, setUserId] = useState('')
-  const [userEmail, setUserEmail] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
+  const [loadingCities, setLoadingCities]   = useState(false)
+  const [loadingSuburbs, setLoadingSuburbs] = useState(false)
+  const [loadingSchools, setLoadingSchools] = useState(false)
+  const [fetchError, setFetchError]         = useState('')
+
+  // Quick suburb / postal-code search
+  const [suburbQuery, setSuburbQuery]         = useState('')
+  const [suburbResults, setSuburbResults]     = useState<SuburbSearchResult[]>([])
+  const [searchingSuburbs, setSearchingSuburbs] = useState(false)
+
+  // Refs to suppress cascade resets when quick-search auto-fills all values
+  const skipProvinceRef = useRef('')
+  const skipCityRef     = useRef('')
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { router.push('/'); return }
       setUserId(user.id)
       setUserEmail(user.email ?? '')
-      supabase.from('profiles').select('full_name').eq('id', user.id).single()
-        .then(({ data }) => { if (data?.full_name) router.push('/dashboard') })
+      supabase.from('profiles').select('profile_completed_at').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.profile_completed_at) router.push('/dashboard') })
     })
   }, [router])
 
-  // Fetch schools when province changes
   useEffect(() => {
-    if (!province) { setSchools([]); return }
-    setLoadingSchools(true)
-    supabase.from('schools').select('*').eq('province', province).order('name')
-      .then(({ data }) => { setSchools((data as School[]) ?? []); setLoadingSchools(false) })
+    if (!province) { setCities([]); setCityId(''); setCityName(''); return }
+    // Skip cascade reset when quick-search already pre-filled city/suburb
+    if (skipProvinceRef.current === province) { skipProvinceRef.current = ''; return }
+    setFetchError(''); setLoadingCities(true)
+    fetch(`/api/locations/cities?province=${encodeURIComponent(province)}`)
+      .then(r => r.json())
+      .then(data => { Array.isArray(data) ? setCities(data) : setFetchError(`Cities: ${data.error ?? 'unknown error'}`); setLoadingCities(false) })
+      .catch(e => { setFetchError(`Cities failed: ${e.message}`); setLoadingCities(false) })
+    setCityId(''); setCityName(''); setSuburbs([]); setSuburbId(''); setSuburbName('')
+    setSchools([]); setSelectedSchool(null); setSchoolSearch('')
   }, [province])
+
+  useEffect(() => {
+    if (!cityId) { setSuburbs([]); setSuburbId(''); setSuburbName(''); return }
+    // Skip cascade reset when quick-search already pre-filled suburb
+    if (skipCityRef.current === cityId) { skipCityRef.current = ''; return }
+    setFetchError(''); setLoadingSuburbs(true)
+    fetch(`/api/locations/suburbs?cityId=${encodeURIComponent(cityId)}`)
+      .then(r => r.json())
+      .then(data => { Array.isArray(data) ? setSuburbs(data) : setFetchError(`Suburbs: ${data.error ?? 'unknown error'}`); setLoadingSuburbs(false) })
+      .catch(e => { setFetchError(`Suburbs failed: ${e.message}`); setLoadingSuburbs(false) })
+    setSuburbId(''); setSuburbName(''); setSchools([]); setSelectedSchool(null); setSchoolSearch('')
+  }, [cityId])
+
+  useEffect(() => {
+    if (!suburbId) { setSchools([]); setSelectedSchool(null); return }
+    setFetchError(''); setLoadingSchools(true)
+    fetch(`/api/locations/schools?suburbId=${encodeURIComponent(suburbId)}`)
+      .then(r => r.json())
+      .then(data => { Array.isArray(data) ? setSchools(data) : setFetchError(`Schools: ${data.error ?? 'unknown error'}`); setLoadingSchools(false) })
+      .catch(e => { setFetchError(`Schools failed: ${e.message}`); setLoadingSchools(false) })
+    setSelectedSchool(null); setSchoolSearch('')
+  }, [suburbId])
 
   const getAge = (d: string) => {
     const birth = new Date(d), today = new Date()
     let age = today.getFullYear() - birth.getFullYear()
-    if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--
+    if (today.getMonth() < birth.getMonth() ||
+      (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--
     return age
   }
 
-  const toggleSchool = (school: School) => {
-    setSelectedSchools(prev =>
-      prev.find(s => s.id === school.id) ? prev.filter(s => s.id !== school.id) : [...prev, school]
-    )
-  }
+  const handleSchoolSearch = useCallback((q: string) => setSchoolSearch(q), [])
 
-  const handleFinish = async () => {
-    setSaveError('')
-    if (!dob) return
-    const isAdult = getAge(dob) >= 18
-    setSaving(true)
-    const { error } = await supabase.from('profiles').upsert({
-      id: userId,
-      email: userEmail,
-      full_name: fullName,
-      date_of_birth: dob,
-      is_age_verified: isAdult,
-      role: isAdult ? 'buyer' : 'browse_only',
-      school_ids: selectedSchools.map(s => s.id),
-    })
-    if (error) { setSaveError('Something went wrong. Please try again.'); setSaving(false); return }
-    router.push('/dashboard')
+  // Debounced suburb search
+  useEffect(() => {
+    if (!suburbQuery || suburbQuery.length < 2) { setSuburbResults([]); return }
+    const timer = setTimeout(async () => {
+      setSearchingSuburbs(true)
+      try {
+        const res = await fetch(`/api/locations/suburbs/search?q=${encodeURIComponent(suburbQuery)}`)
+        const data = await res.json()
+        setSuburbResults(Array.isArray(data) ? data : [])
+      } catch { setSuburbResults([]) }
+      finally { setSearchingSuburbs(false) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [suburbQuery])
+
+  // Called when user picks a suburb from the quick-search results
+  const applySuburbResult = async (r: SuburbSearchResult) => {
+    setSearchingSuburbs(true)
+    // Pre-fetch dropdown lists so the manual cascade pickers show correctly
+    const [citiesRes, suburbsRes] = await Promise.all([
+      fetch(`/api/locations/cities?province=${encodeURIComponent(r.province_code)}`).then(x => x.json()),
+      fetch(`/api/locations/suburbs?cityId=${encodeURIComponent(r.city_id)}`).then(x => x.json()),
+    ])
+    setSearchingSuburbs(false)
+    // Set refs BEFORE state so the cascade useEffects see them and skip their resets
+    skipProvinceRef.current = r.province_code
+    skipCityRef.current     = r.city_id
+    setCities(Array.isArray(citiesRes) ? citiesRes : [])
+    setSuburbs(Array.isArray(suburbsRes) ? suburbsRes : [])
+    setProvince(r.province_code)
+    setCityId(r.city_id)
+    setCityName(r.city_name)
+    setSuburbId(r.id)
+    setSuburbName(r.name)
+    setSuburbQuery('')
+    setSuburbResults([])
   }
 
   const filteredSchools = schools.filter(s =>
     s.name.toLowerCase().includes(schoolSearch.toLowerCase())
   )
 
+  const locationComplete = !!(province && cityId && suburbId)
+
+  const handleFinish = async () => {
+    if (!locationComplete) return
+    setSaveError('')
+    const isAdult = dob ? getAge(dob) >= 18 : false
+    setSaving(true)
+
+    const { error } = await supabase.from('profiles').upsert({
+      id: userId,
+      email: userEmail,
+      full_name: fullName,
+      date_of_birth: dob || null,
+      // RULE: users must be 18+ before transacting — under 18s get browse_only role
+      is_age_verified: isAdult,
+      role: isAdult ? 'buyer' : 'browse_only',
+      province,
+      city_id: cityId,
+      city_name: cityName,
+      suburb_id: suburbId,
+      suburb_name: suburbName,
+      school_id: selectedSchool?.id ?? null,
+      school_name: selectedSchool?.name ?? null,
+      school_ids: selectedSchool ? [selectedSchool.id] : [],
+      // RULE: profile_completed_at gates all buying and listing
+      profile_completed_at: new Date().toISOString(),
+    })
+
+    if (error) { setSaveError('Something went wrong. Please try again.'); setSaving(false); return }
+    router.push('/dashboard')
+  }
+
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={s.page}>
       <NavBar />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 57px)', padding: '24px' }}>
-        <div style={card}>
+      <div style={s.wrap}>
+        <div style={s.card}>
+
           {/* Progress */}
-          <p style={{ color: '#7c3aed', fontSize: '13px', marginBottom: '4px' }}>Step {step} of {TOTAL_STEPS}</p>
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '28px' }}>
+          <p style={{ color: BLUE, fontSize: '13px', marginBottom: '4px', fontWeight: '600' }}>Step {step} of {TOTAL_STEPS}</p>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '32px' }}>
             {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-              <div key={i} style={{ flex: 1, height: '4px', borderRadius: '2px', background: i < step ? '#7c3aed' : '#333' }} />
+              <div key={i} style={{ flex: 1, height: '4px', borderRadius: '2px', background: i < step ? BLUE : BORDER }} />
             ))}
           </div>
 
-          {/* Step 1 — Name */}
+          {/* ── Step 1: Name ─────────────────────────────────── */}
           {step === 1 && <>
-            <h2 style={{ color: '#fff', marginBottom: '8px' }}>Welcome to NextKid!</h2>
-            <p style={{ color: '#888', fontSize: '14px', marginBottom: '28px' }}>Let's get your account set up.</p>
-            <label style={{ color: '#aaa', fontSize: '13px', display: 'block', marginBottom: '6px' }}>Full Name</label>
-            <input style={input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Your full name" />
+            <h2 style={{ color: TEXT, fontSize: '22px', fontWeight: '700', marginBottom: '8px' }}>Welcome to NextKid!</h2>
+            <p style={{ color: MUTED, fontSize: '14px', marginBottom: '28px' }}>Let's get your account set up.</p>
+            <label style={s.label}>Full Name</label>
+            <input style={s.input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Your full name" autoFocus />
             <button style={{ ...btn(!!fullName), width: '100%', marginTop: '20px' }} disabled={!fullName} onClick={() => setStep(2)}>
               Continue →
             </button>
           </>}
 
-          {/* Step 2 — Age verification */}
+          {/* ── Step 2: Age verification ──────────────────────── */}
           {step === 2 && <>
-            <h2 style={{ color: '#fff', marginBottom: '8px' }}>Verify your age</h2>
-            <p style={{ color: '#888', fontSize: '14px', marginBottom: '28px' }}>
-              {/* RULE: users must be 18+ before transacting */}
+            <h2 style={{ color: TEXT, fontSize: '22px', fontWeight: '700', marginBottom: '8px' }}>Verify your age</h2>
+            {/* RULE: users must be 18+ before transacting */}
+            <p style={{ color: MUTED, fontSize: '14px', marginBottom: '28px' }}>
               You must be 18+ to buy or sell. Under 18s can browse only.
             </p>
-            <label style={{ color: '#aaa', fontSize: '13px', display: 'block', marginBottom: '6px' }}>Date of Birth</label>
-            <input type="date" style={input} value={dob} onChange={e => { setDob(e.target.value); setAgeError('') }} />
-            <div style={{ background: '#1e1b10', border: '1px solid #554', borderRadius: '8px', padding: '12px', margin: '16px 0' }}>
-              <p style={{ color: '#bba', fontSize: '12px', margin: 0 }}>🔒 Your date of birth is used only for age verification and stored securely.</p>
+            <label style={s.label}>Date of Birth</label>
+            <input type="date" style={s.input} value={dob} onChange={e => setDob(e.target.value)} />
+            <div style={{ background: '#fff8f7', border: '1px solid #ffd5cf', borderRadius: '10px', padding: '12px', margin: '16px 0' }}>
+              <p style={{ color: MUTED, fontSize: '12px', margin: 0 }}>🔒 Used only for age verification and stored securely.</p>
             </div>
-            {ageError && <p style={{ color: '#ff6b6b', fontSize: '13px', marginBottom: '12px' }}>{ageError}</p>}
             <div style={{ display: 'flex', gap: '12px' }}>
-              <button style={{ ...btn(true), flex: 1, background: 'transparent', border: '1px solid #444', color: '#aaa' }} onClick={() => setStep(1)}>← Back</button>
-              <button style={{ ...btn(!!dob), flex: 2 }} disabled={!dob} onClick={() => { if (!dob) { setAgeError('Please enter your date of birth.'); return } setStep(3) }}>Continue →</button>
+              <button style={{ ...btn(true), flex: 1, background: 'transparent', border: `1px solid ${BORDER}`, color: MUTED }} onClick={() => setStep(1)}>← Back</button>
+              <button style={{ ...btn(!!dob), flex: 2 }} disabled={!dob} onClick={() => setStep(3)}>Continue →</button>
             </div>
           </>}
 
-          {/* Step 3 — School picker */}
+          {/* ── Step 3: Location cascade ─────────────────────── */}
           {step === 3 && <>
-            <h2 style={{ color: '#fff', marginBottom: '8px' }}>Add your school(s)</h2>
-            <p style={{ color: '#888', fontSize: '14px', marginBottom: '20px' }}>
-              Pick the school(s) your child attends so we can show relevant uniform and gear listings. You can skip this and add later.
+            <h2 style={{ color: TEXT, fontSize: '22px', fontWeight: '700', marginBottom: '8px' }}>Where are you located?</h2>
+            <p style={{ color: MUTED, fontSize: '14px', marginBottom: '24px' }}>
+              Helps us show listings from your area and school.
             </p>
 
-            {/* Province filter */}
-            <label style={{ color: '#aaa', fontSize: '13px', display: 'block', marginBottom: '6px' }}>Province</label>
-            <select style={{ ...input, marginBottom: '12px' }} value={province} onChange={e => { setProvince(e.target.value); setSchoolSearch('') }}>
+            {/* Debug: fetch errors surface here */}
+            {fetchError && (
+              <div style={{ background: '#fff5f5', border: '1px solid #feb2b2', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px' }}>
+                <p style={{ color: '#c53030', fontSize: '12px', margin: 0 }}>⚠ {fetchError}</p>
+              </div>
+            )}
+
+            {/* Quick suburb / postal-code search */}
+            <label style={s.label}>Search suburb or postal code</label>
+            <div style={{ position: 'relative', marginBottom: '6px' }}>
+              <input
+                style={{ ...s.input, marginBottom: 0, paddingRight: '40px' }}
+                value={suburbQuery}
+                onChange={e => setSuburbQuery(e.target.value)}
+                placeholder="e.g. Sandton or 2196"
+                autoComplete="off"
+              />
+              {searchingSuburbs && (
+                <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: MUTED, fontSize: '12px' }}>...</span>
+              )}
+            </div>
+            {suburbResults.length > 0 && (
+              <div style={{ border: `1px solid ${BORDER}`, borderRadius: '10px', marginBottom: '12px', overflow: 'hidden', background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+                {suburbResults.map(r => (
+                  <div key={r.id} onClick={() => applySuburbResult(r)}
+                    style={{ padding: '11px 14px', cursor: 'pointer', borderBottom: `1px solid ${BORDER}`, background: suburbId === r.id ? '#eef0ff' : '#fff' }}>
+                    <p style={{ margin: 0, fontWeight: 600, fontSize: '13px', color: suburbId === r.id ? BLUE : TEXT }}>
+                      {r.name}{r.postal_code ? ` · ${r.postal_code}` : ''}
+                      {suburbId === r.id && <span style={{ marginLeft: '6px', color: BLUE }}>✓</span>}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '11px', color: MUTED }}>{r.city_name}, {r.province_code}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {suburbQuery.length >= 2 && !searchingSuburbs && suburbResults.length === 0 && (
+              <p style={{ color: MUTED, fontSize: '12px', marginBottom: '12px' }}>No suburbs found — try a different name or postal code</p>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '4px 0 20px' }}>
+              <div style={{ flex: 1, height: '1px', background: BORDER }} />
+              <span style={{ color: MUTED, fontSize: '11px', whiteSpace: 'nowrap' }}>or select manually</span>
+              <div style={{ flex: 1, height: '1px', background: BORDER }} />
+            </div>
+
+            {/* Province */}
+            <label style={s.label}>Province</label>
+            <select style={{ ...s.select, marginBottom: '12px' }} value={province} onChange={e => setProvince(e.target.value)}>
               <option value="">Select a province...</option>
               {SA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
 
-            {/* School search */}
-            {province && <>
-              <label style={{ color: '#aaa', fontSize: '13px', display: 'block', marginBottom: '6px' }}>Search school</label>
-              <input style={{ ...input, marginBottom: '10px' }} value={schoolSearch} onChange={e => setSchoolSearch(e.target.value)} placeholder="Type school name..." />
+            {/* City */}
+            <label style={{ ...s.label, color: province ? MUTED : BORDER }}>City</label>
+            <select
+              style={{ ...(province ? s.select : s.selectDisabled), marginBottom: '12px' }}
+              disabled={!province || loadingCities}
+              value={cityId}
+              onChange={e => {
+                const opt = cities.find(c => c.id === e.target.value)
+                setCityId(e.target.value); setCityName(opt?.name ?? '')
+              }}
+            >
+              <option value="">{loadingCities ? 'Loading...' : 'Select a city...'}</option>
+              {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
 
-              <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px' }}>
+            {/* Suburb */}
+            <label style={{ ...s.label, color: cityId ? MUTED : BORDER }}>Suburb</label>
+            <select
+              style={{ ...(cityId ? s.select : s.selectDisabled), marginBottom: '16px' }}
+              disabled={!cityId || loadingSuburbs}
+              value={suburbId}
+              onChange={e => {
+                const opt = suburbs.find(s => s.id === e.target.value)
+                setSuburbId(e.target.value); setSuburbName(opt?.name ?? '')
+              }}
+            >
+              <option value="">{loadingSuburbs ? 'Loading...' : 'Select a suburb...'}</option>
+              {suburbs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+
+            {/* School */}
+            {suburbId && <>
+              <label style={s.label}>
+                School <span style={{ color: BORDER, fontWeight: 400 }}>(optional — add now or later)</span>
+              </label>
+              <input
+                style={{ ...s.input, marginBottom: '8px' }}
+                value={schoolSearch}
+                onChange={e => handleSchoolSearch(e.target.value)}
+                placeholder="Search school name..."
+                disabled={loadingSchools}
+              />
+
+              <div style={{ maxHeight: '180px', overflowY: 'auto', border: `1px solid ${BORDER}`, borderRadius: '10px', marginBottom: '10px', background: '#fff' }}>
                 {loadingSchools
-                  ? <p style={{ color: '#666', padding: '16px', textAlign: 'center', margin: 0 }}>Loading...</p>
+                  ? <p style={{ color: MUTED, padding: '14px', textAlign: 'center', margin: 0, fontSize: '13px' }}>Loading...</p>
                   : filteredSchools.length === 0
-                    ? <p style={{ color: '#666', padding: '16px', textAlign: 'center', margin: 0 }}>No schools found.</p>
+                    ? <p style={{ color: MUTED, padding: '14px', textAlign: 'center', margin: 0, fontSize: '13px' }}>
+                        {schools.length === 0 ? 'No schools in this suburb yet.' : 'No match — try a different search.'}
+                      </p>
                     : filteredSchools.map(school => {
-                      const selected = selectedSchools.some(s => s.id === school.id)
+                      const selected = selectedSchool?.id === school.id
                       return (
-                        <div key={school.id} onClick={() => toggleSchool(school)}
-                          style={{ padding: '12px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: selected ? '#2e1f5e' : 'transparent', borderBottom: '1px solid #222' }}>
+                        <div key={school.id} onClick={() => setSelectedSchool(selected ? null : school)}
+                          style={{
+                            padding: '11px 14px', cursor: 'pointer',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            background: selected ? '#eef0ff' : '#fff',
+                            borderBottom: `1px solid ${BORDER}`,
+                          }}>
                           <div>
-                            <p style={{ color: '#fff', margin: 0, fontSize: '14px' }}>{school.name}</p>
-                            <p style={{ color: '#666', margin: 0, fontSize: '12px' }}>{school.city} · {school.type}</p>
+                            <p style={{ color: selected ? BLUE : TEXT, margin: 0, fontSize: '13px', fontWeight: 600 }}>{school.name}</p>
+                            <p style={{ color: MUTED, margin: 0, fontSize: '11px' }}>{school.city_name} · {school.type}</p>
                           </div>
-                          {selected && <span style={{ color: '#7c3aed', fontSize: '18px' }}>✓</span>}
+                          {selected && <span style={{ color: BLUE, fontSize: '16px', fontWeight: '700' }}>✓</span>}
                         </div>
                       )
                     })
                 }
               </div>
+
+              {schools.length > 0 && !selectedSchool && (
+                <p style={{ color: MUTED, fontSize: '12px', marginBottom: '10px' }}>
+                  Can't find your school?{' '}
+                  <span style={{ color: BLUE, cursor: 'pointer', fontWeight: '600' }}>Request it to be added</span>
+                </p>
+              )}
             </>}
 
-            {/* Selected schools summary */}
-            {selectedSchools.length > 0 && (
-              <div style={{ marginBottom: '16px' }}>
-                <p style={{ color: '#aaa', fontSize: '13px', marginBottom: '8px' }}>Selected ({selectedSchools.length}):</p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {selectedSchools.map(s => (
-                    <span key={s.id} onClick={() => toggleSchool(s)} style={{ background: '#2e1f5e', color: '#a78bfa', padding: '4px 10px', borderRadius: '20px', fontSize: '12px', cursor: 'pointer' }}>
-                      {s.name} ✕
-                    </span>
-                  ))}
+            {/* Selected school badge */}
+            {selectedSchool && (
+              <div style={{ background: '#eef0ff', border: `1px solid ${BLUE}`, borderRadius: '10px', padding: '10px 14px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <p style={{ color: BLUE, margin: 0, fontSize: '13px', fontWeight: 700 }}>{selectedSchool.name}</p>
+                  <p style={{ color: '#6b7fd7', margin: 0, fontSize: '11px' }}>{selectedSchool.city_name} · {selectedSchool.type}</p>
                 </div>
+                <span onClick={() => setSelectedSchool(null)} style={{ color: BLUE, cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>✕</span>
               </div>
             )}
 
-            {saveError && <p style={{ color: '#ff6b6b', fontSize: '13px', marginBottom: '12px' }}>{saveError}</p>}
+            {saveError && <p style={{ color: '#e53e3e', fontSize: '13px', marginBottom: '12px' }}>{saveError}</p>}
+
+            {!locationComplete && (
+              <p style={{ color: MUTED, fontSize: '12px', textAlign: 'center', marginBottom: '10px' }}>
+                Select province, city, and suburb to continue
+              </p>
+            )}
 
             <div style={{ display: 'flex', gap: '12px' }}>
-              <button style={{ ...btn(true), flex: 1, background: 'transparent', border: '1px solid #444', color: '#aaa' }} onClick={() => setStep(2)}>← Back</button>
-              <button style={{ ...btn(!saving), flex: 2 }} disabled={saving} onClick={handleFinish}>
-                {saving ? 'Saving...' : selectedSchools.length > 0 ? 'Finish Setup ✓' : 'Skip & Finish →'}
+              <button style={{ ...btn(true), flex: 1, background: 'transparent', border: `1px solid ${BORDER}`, color: MUTED }} onClick={() => setStep(2)}>← Back</button>
+              <button style={{ ...btn(locationComplete && !saving), flex: 2 }} disabled={!locationComplete || saving} onClick={handleFinish}>
+                {saving ? 'Saving...' : selectedSchool ? 'Finish Setup ✓' : 'Finish (add school later)'}
               </button>
             </div>
           </>}
+
         </div>
       </div>
     </div>

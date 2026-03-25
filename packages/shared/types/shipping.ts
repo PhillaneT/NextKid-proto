@@ -203,7 +203,26 @@ export interface ShippingQuote {
   deliveryLockerAddress?: string;
   
   // Raw TCG response (for debugging/auditing)
-  rawResponse?: unknown;
+  rawResponse?: TCGRateOption;
+}
+
+// ============================================
+// TCG API RESPONSE TYPES
+// ============================================
+
+/**
+ * A single rate option returned by the TCG /rates endpoint.
+ * Used to type API responses strictly (no `any`).
+ */
+export interface TCGRateOption {
+  service_level_code: string;
+  service_level: string;
+  rate: number;               // ZAR inc VAT (float)
+  rate_excluding_vat: number;
+  vat_amount: number;
+  collection_date: string;    // ISO date string
+  delivery_date_from: string; // ISO date string
+  delivery_date_to: string;   // ISO date string
 }
 
 // ============================================

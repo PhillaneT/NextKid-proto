@@ -151,13 +151,13 @@ export default function ItemPage() {
     }
     // Fetch seller stats (province + sold count) and school name for school-specific items
     const [{ data: sellerProfile }, { count: soldCount }, { data: schoolRow }] = await Promise.all([
-      supabase.from('profiles').select('province_code').eq('id', data.seller_id).single(),
+      supabase.from('profiles').select('province').eq('id', data.seller_id).single(),
       supabase.from('listings').select('*', { count: 'exact', head: true }).eq('seller_id', data.seller_id).eq('status', 'COMPLETED'),
       data.seller_school_id
         ? supabase.from('schools').select('name').eq('id', data.seller_school_id).single()
         : Promise.resolve({ data: null }),
     ]);
-    setSellerProvince(sellerProfile?.province_code ?? null);
+    setSellerProvince(sellerProfile?.province ?? null);
     setSellerSoldCount(soldCount ?? 0);
     setViewSchoolName(schoolRow?.name ?? null);
 
@@ -262,13 +262,9 @@ export default function ItemPage() {
     fetchOffers(item!.id);
   }
 
-  async function handleBuyNow() {
-    if (!currentUserId) return;
-    await supabase.from('notifications').insert({
-      user_id: item!.seller_id, type: 'purchase',
-      message: `Someone purchased "${item!.title}" at R${(item!.price_cents / 100).toLocaleString()} 🎉`, item_id: item!.id,
-    });
-    alert('Purchase recorded! The seller has been notified.');
+  function handleBuyNow() {
+    if (!currentUserId || !item) return;
+    router.push(`/checkout/${item.id}`);
   }
 
   async function toggleLike() {

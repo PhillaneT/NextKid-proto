@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { SA_PROVINCES } from '@nextkid/shared'
 
 interface CityOption   { id: string; name: string }
-interface SuburbOption { id: string; name: string }
+interface SuburbOption { id: string; name: string; postal_code?: string }
 interface SchoolOption { id: string; name: string; type: string; city_name: string }
 interface SuburbSearchResult { id: string; name: string; city_id: string; city_name: string; province_code: string; postal_code?: string }
 
@@ -44,7 +44,7 @@ function NavBar() {
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const TOTAL_STEPS = 3
+  const TOTAL_STEPS = 4
 
   const [step, setStep]           = useState(1)
   const [userId, setUserId]       = useState('')
@@ -68,7 +68,11 @@ export default function OnboardingPage() {
   const [suburbName, setSuburbName] = useState('')
   const [schools, setSchools]       = useState<SchoolOption[]>([])
   const [schoolSearch, setSchoolSearch] = useState('')
-  const [selectedSchool, setSelectedSchool] = useState<SchoolOption | null>(null)
+  const [selectedSchools, setSelectedSchools] = useState<SchoolOption[]>([])
+
+  // Step 4 — delivery address (needed for D2D shipping)
+  const [streetAddress, setStreetAddress]       = useState('')
+  const [deliveryPostalCode, setDeliveryPostalCode] = useState('')
 
   const [loadingCities, setLoadingCities]   = useState(false)
   const [loadingSuburbs, setLoadingSuburbs] = useState(false)
@@ -104,7 +108,7 @@ export default function OnboardingPage() {
       .then(data => { Array.isArray(data) ? setCities(data) : setFetchError(`Cities: ${data.error ?? 'unknown error'}`); setLoadingCities(false) })
       .catch(e => { setFetchError(`Cities failed: ${e.message}`); setLoadingCities(false) })
     setCityId(''); setCityName(''); setSuburbs([]); setSuburbId(''); setSuburbName('')
-    setSchools([]); setSelectedSchool(null); setSchoolSearch('')
+    setSchools([]); setSelectedSchools([]); setSchoolSearch('')
   }, [province])
 
   useEffect(() => {
@@ -116,17 +120,17 @@ export default function OnboardingPage() {
       .then(r => r.json())
       .then(data => { Array.isArray(data) ? setSuburbs(data) : setFetchError(`Suburbs: ${data.error ?? 'unknown error'}`); setLoadingSuburbs(false) })
       .catch(e => { setFetchError(`Suburbs failed: ${e.message}`); setLoadingSuburbs(false) })
-    setSuburbId(''); setSuburbName(''); setSchools([]); setSelectedSchool(null); setSchoolSearch('')
+    setSuburbId(''); setSuburbName(''); setSchools([]); setSelectedSchools([]); setSchoolSearch('')
   }, [cityId])
 
   useEffect(() => {
-    if (!suburbId) { setSchools([]); setSelectedSchool(null); return }
+    if (!suburbId) { setSchools([]); setSelectedSchools([]); return }
     setFetchError(''); setLoadingSchools(true)
     fetch(`/api/locations/schools?suburbId=${encodeURIComponent(suburbId)}`)
       .then(r => r.json())
       .then(data => { Array.isArray(data) ? setSchools(data) : setFetchError(`Schools: ${data.error ?? 'unknown error'}`); setLoadingSchools(false) })
       .catch(e => { setFetchError(`Schools failed: ${e.message}`); setLoadingSchools(false) })
-    setSelectedSchool(null); setSchoolSearch('')
+    setSchoolSearch('')
   }, [suburbId])
 
   const getAge = (d: string) => {
@@ -173,6 +177,7 @@ export default function OnboardingPage() {
     setCityName(r.city_name)
     setSuburbId(r.id)
     setSuburbName(r.name)
+    if (r.postal_code) setDeliveryPostalCode(r.postal_code)
     setSuburbQuery('')
     setSuburbResults([])
   }
@@ -202,9 +207,11 @@ export default function OnboardingPage() {
       city_name: cityName,
       suburb_id: suburbId,
       suburb_name: suburbName,
-      school_id: selectedSchool?.id ?? null,
-      school_name: selectedSchool?.name ?? null,
-      school_ids: selectedSchool ? [selectedSchool.id] : [],
+      school_id: selectedSchools[0]?.id ?? null,
+      school_name: selectedSchools[0]?.name ?? null,
+      school_ids: selectedSchools.map(s => s.id),
+      street_address: streetAddress || null,
+      postal_code: deliveryPostalCode || null,
       // RULE: profile_completed_at gates all buying and listing
       profile_completed_at: new Date().toISOString(),
     })
@@ -338,7 +345,9 @@ export default function OnboardingPage() {
               value={suburbId}
               onChange={e => {
                 const opt = suburbs.find(s => s.id === e.target.value)
-                setSuburbId(e.target.value); setSuburbName(opt?.name ?? '')
+                setSuburbId(e.target.value)
+                setSuburbName(opt?.name ?? '')
+                if (opt?.postal_code) setDeliveryPostalCode(opt.postal_code)
               }}
             >
               <option value="">{loadingSuburbs ? 'Loading...' : 'Select a suburb...'}</option>
@@ -366,9 +375,13 @@ export default function OnboardingPage() {
                         {schools.length === 0 ? 'No schools in this suburb yet.' : 'No match — try a different search.'}
                       </p>
                     : filteredSchools.map(school => {
-                      const selected = selectedSchool?.id === school.id
+                      const selected = selectedSchools.some(s => s.id === school.id)
                       return (
-                        <div key={school.id} onClick={() => setSelectedSchool(selected ? null : school)}
+                        <div key={school.id} onClick={() => {
+                          setSelectedSchools(prev =>
+                            selected ? prev.filter(s => s.id !== school.id) : [...prev, school]
+                          )
+                        }}
                           style={{
                             padding: '11px 14px', cursor: 'pointer',
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -386,7 +399,7 @@ export default function OnboardingPage() {
                 }
               </div>
 
-              {schools.length > 0 && !selectedSchool && (
+              {schools.length > 0 && selectedSchools.length === 0 && (
                 <p style={{ color: MUTED, fontSize: '12px', marginBottom: '10px' }}>
                   Can't find your school?{' '}
                   <span style={{ color: BLUE, cursor: 'pointer', fontWeight: '600' }}>Request it to be added</span>
@@ -394,14 +407,18 @@ export default function OnboardingPage() {
               )}
             </>}
 
-            {/* Selected school badge */}
-            {selectedSchool && (
-              <div style={{ background: '#eef0ff', border: `1px solid ${BLUE}`, borderRadius: '10px', padding: '10px 14px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <p style={{ color: BLUE, margin: 0, fontSize: '13px', fontWeight: 700 }}>{selectedSchool.name}</p>
-                  <p style={{ color: '#6b7fd7', margin: 0, fontSize: '11px' }}>{selectedSchool.city_name} · {selectedSchool.type}</p>
-                </div>
-                <span onClick={() => setSelectedSchool(null)} style={{ color: BLUE, cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>✕</span>
+            {/* Selected school chips */}
+            {selectedSchools.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '14px' }}>
+                {selectedSchools.map(school => (
+                  <div key={school.id} style={{ background: '#eef0ff', border: `1px solid ${BLUE}`, borderRadius: '20px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: BLUE, fontSize: '13px', fontWeight: 600 }}>{school.name}</span>
+                    <span
+                      onClick={() => setSelectedSchools(prev => prev.filter(s => s.id !== school.id))}
+                      style={{ color: BLUE, cursor: 'pointer', fontSize: '14px', lineHeight: 1, fontWeight: 700 }}
+                    >✕</span>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -415,8 +432,66 @@ export default function OnboardingPage() {
 
             <div style={{ display: 'flex', gap: '12px' }}>
               <button style={{ ...btn(true), flex: 1, background: 'transparent', border: `1px solid ${BORDER}`, color: MUTED }} onClick={() => setStep(2)}>← Back</button>
-              <button style={{ ...btn(locationComplete && !saving), flex: 2 }} disabled={!locationComplete || saving} onClick={handleFinish}>
-                {saving ? 'Saving...' : selectedSchool ? 'Finish Setup ✓' : 'Finish (add school later)'}
+              <button style={{ ...btn(locationComplete), flex: 2 }} disabled={!locationComplete} onClick={() => setStep(4)}>
+                Continue →
+              </button>
+            </div>
+          </>}
+
+          {/* ── Step 4: Delivery address ──────────────────────── */}
+          {step === 4 && <>
+            <h2 style={{ color: TEXT, fontSize: '22px', fontWeight: '700', marginBottom: '8px' }}>Your delivery address</h2>
+            <p style={{ color: MUTED, fontSize: '14px', marginBottom: '24px' }}>
+              Used for door-to-door pickups and deliveries. You can skip this now and add it from your profile.
+            </p>
+
+            {/* Suburb confirmation */}
+            <div style={{ background: '#f4f4f4', borderRadius: '10px', padding: '10px 14px', marginBottom: '20px' }}>
+              <p style={{ color: MUTED, fontSize: '12px', margin: '0 0 2px' }}>Delivering to</p>
+              <p style={{ color: TEXT, fontSize: '13px', fontWeight: 600, margin: 0 }}>{suburbName}, {cityName}</p>
+            </div>
+
+            <label style={s.label}>Street address</label>
+            <input
+              style={{ ...s.input, marginBottom: '12px' }}
+              value={streetAddress}
+              onChange={e => setStreetAddress(e.target.value)}
+              placeholder="e.g. 12 Main Street, Apt 4"
+              autoFocus
+            />
+
+            <label style={s.label}>Postal code</label>
+            <input
+              style={{ ...s.input, marginBottom: '24px' }}
+              value={deliveryPostalCode}
+              onChange={e => setDeliveryPostalCode(e.target.value)}
+              placeholder="e.g. 2196"
+              inputMode="numeric"
+            />
+
+            {saveError && <p style={{ color: '#e53e3e', fontSize: '13px', marginBottom: '12px' }}>{saveError}</p>}
+
+            <button
+              style={{ ...btn(!saving), width: '100%', marginBottom: '10px' }}
+              disabled={saving}
+              onClick={handleFinish}
+            >
+              {saving ? 'Saving...' : 'Finish Setup ✓'}
+            </button>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                style={{ ...btn(true), flex: 1, background: 'transparent', border: `1px solid ${BORDER}`, color: MUTED }}
+                onClick={() => setStep(3)}
+              >
+                ← Back
+              </button>
+              <button
+                style={{ ...btn(!saving), flex: 2, background: 'transparent', border: `1px solid ${BORDER}`, color: MUTED }}
+                disabled={saving}
+                onClick={() => { setStreetAddress(''); setDeliveryPostalCode(''); handleFinish(); }}
+              >
+                {saving ? 'Saving...' : 'Skip for now'}
               </button>
             </div>
           </>}

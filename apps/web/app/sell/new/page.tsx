@@ -1,28 +1,30 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import {
-  X, Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
-  School, CheckCircle2,
+  X, Shirt, Trophy, Footprints, Dumbbell, BookOpen,
+  ShoppingBag, Package, School, CheckCircle2, Truck, Box,
 } from 'lucide-react';
 import {
   ALL_CATEGORIES, SCHOOL_SPECIFIC_CATEGORIES, SUBCATEGORIES,
   LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES,
+  canFitInLocker, getLockerSizeForParcel,
 } from '@nextkid/shared';
-import type { ListingCategory, School as SchoolType } from '@nextkid/shared';
+import type { ListingCategory, School as SchoolType, ParcelDimensions, SellerShippingOption } from '@nextkid/shared';
 
-type Step = 1 | 2 | 3 | 4;
+// Steps: 1=Category, 2=School(optional), 3=Details, 4=Parcel+Shipping, 5=Photos+Publish
+type Step = 1 | 2 | 3 | 4 | 5;
 
 const CATEGORY_ICON: Record<string, React.ReactNode> = {
-  'School Uniforms': <Shirt size={22} strokeWidth={2} />,
-  'School Sports Kit': <Trophy size={22} strokeWidth={2} />,
-  'Shoes': <Footprints size={22} strokeWidth={2} />,
-  'Sports Equipment': <Dumbbell size={22} strokeWidth={2} />,
+  'School Uniforms':    <Shirt size={22} strokeWidth={2} />,
+  'School Sports Kit':  <Trophy size={22} strokeWidth={2} />,
+  'Shoes':              <Footprints size={22} strokeWidth={2} />,
+  'Sports Equipment':   <Dumbbell size={22} strokeWidth={2} />,
   'Books & Stationery': <BookOpen size={22} strokeWidth={2} />,
   'Bags & Accessories': <ShoppingBag size={22} strokeWidth={2} />,
-  'Other': <Package size={22} strokeWidth={2} />,
+  'Other':              <Package size={22} strokeWidth={2} />,
 };
 
 const inputCls = 'w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf] transition placeholder-[#979797]';
@@ -39,6 +41,14 @@ const CATEGORY_FIELDS: Record<string, { clothingSize?: true; shoeSize?: true; ge
   'Other':              {},
 };
 
+const LOCKER_SIZE_LABELS: Record<string, string> = {
+  'V4-XS': 'Extra Small',
+  'V4-S':  'Small',
+  'V4-M':  'Medium',
+  'V4-L':  'Large',
+  'V4-XL': 'Extra Large',
+};
+
 export default function NewListingPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
@@ -53,17 +63,15 @@ export default function NewListingPage() {
   const [category, setCategory] = useState<ListingCategory | ''>('');
   const isSchoolSpecific = SCHOOL_SPECIFIC_CATEGORIES.includes(category as typeof SCHOOL_SPECIFIC_CATEGORIES[number]);
 
-  // Step 2 — school picker (only for school-specific categories)
+  // Step 2 — school picker (school-specific categories only)
   const [province, setProvince] = useState('');
   const [schools, setSchools] = useState<SchoolType[]>([]);
   const [schoolSearch, setSchoolSearch] = useState('');
   const [selectedSchool, setSelectedSchool] = useState<SchoolType | null>(null);
   const [loadingSchools, setLoadingSchools] = useState(false);
-
-  // Profile schools — pre-loaded from user's saved schools to skip/simplify step 2
   const [profileSchools, setProfileSchools] = useState<SchoolType[]>([]);
 
-  // Step 3 — details
+  // Step 3 — item details
   const [form, setForm] = useState({
     title: '',
     subcategory: '',
@@ -71,13 +79,36 @@ export default function NewListingPage() {
     condition: 'good' as typeof LISTING_CONDITIONS[number],
     size: '',
     gender: '' as 'boys' | 'girls' | 'unisex' | '',
-    grade: '' as string,
+    grade: '',
     description: '',
-    listing_type: 'buy_now',
   });
 
-  // Load user's saved schools from their profile on mount
-  useEffect(() => {
+  // Step 4 — parcel dimensions + shipping methods
+  const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
+  const [shippingMethods, setShippingMethods] = useState<SellerShippingOption[]>([]);
+
+  // Derived: parcel dimensions as numbers (for locker size calc)
+  const parcelDims = useMemo<ParcelDimensions | null>(() => {
+    const l = parseFloat(parcel.l), w = parseFloat(parcel.w);
+    const h = parseFloat(parcel.h), weight = parseFloat(parcel.weight);
+    if ([l, w, h, weight].some(isNaN) || [l, w, h, weight].some(v => v <= 0)) return null;
+    return { lengthCm: l, widthCm: w, heightCm: h, weightKg: weight };
+  }, [parcel]);
+
+  const lockerSize   = parcelDims ? getLockerSizeForParcel(parcelDims) : null;
+  const fitsInLocker = parcelDims ? canFitInLocker(parcelDims) : false;
+
+  const parcelComplete = parcelDims !== null;
+  // RULE: listing must not go ACTIVE without at least one shipping method
+  const shippingComplete = shippingMethods.length > 0;
+
+  const toggleShipping = (method: SellerShippingOption) =>
+    setShippingMethods(prev =>
+      prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
+    );
+
+  // Load profile schools on mount
+  useState(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       const { data: prof } = await supabase.from('profiles').select('school_ids, province').eq('id', user.id).single();
@@ -87,32 +118,29 @@ export default function NewListingPage() {
         setProfileSchools((saved as SchoolType[]) ?? []);
       }
     });
-  }, []);
+  });
 
-  useEffect(() => {
-    if (!province) { setSchools([]); return; }
+  const loadSchools = (prov: string) => {
+    if (!prov) { setSchools([]); return; }
     setLoadingSchools(true);
-    supabase.from('schools').select('*').eq('province', province).order('name')
+    supabase.from('schools').select('*').eq('province', prov).order('name')
       .then(({ data }) => { setSchools((data as SchoolType[]) ?? []); setLoadingSchools(false); });
-  }, [province]);
+  };
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
     setUploading(true);
-    const newPreviews: string[] = [];
-    const newUrls: string[] = [];
     for (const file of files) {
-      newPreviews.push(URL.createObjectURL(file));
+      const preview = URL.createObjectURL(file);
       const fileName = `items/${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
       const { error: uploadError } = await supabase.storage.from('item-images').upload(fileName, file);
       if (!uploadError) {
         const { data: urlData } = supabase.storage.from('item-images').getPublicUrl(fileName);
-        newUrls.push(urlData.publicUrl);
+        setImageUrls(prev => [...prev, urlData.publicUrl]);
       }
+      setImagePreviews(prev => [...prev, preview]);
     }
-    setImagePreviews(prev => [...prev, ...newPreviews]);
-    setImageUrls(prev => [...prev, ...newUrls]);
     setUploading(false);
   };
 
@@ -123,66 +151,88 @@ export default function NewListingPage() {
 
   const handleSubmit = async () => {
     setError('');
-    if (!form.title || !form.price) { setError('Title and price are required.'); return; }
+    if (!parcelComplete || !shippingComplete) {
+      setError('Parcel dimensions and at least one shipping method are required.');
+      return;
+    }
     setLoading(true);
-
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { error: insertError } = await supabase.from('items').insert({
-      seller_id: user.id,
-      title: form.title,
+    const { data: prof } = await supabase.from('profiles')
+      .select('province, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
+      .eq('id', user.id).single();
+
+    // RULE: condition stored uppercase to match DB check constraint
+    const { error: insertError } = await supabase.from('listings').insert({
+      seller_id:            user.id,
+      title:                form.title,
+      description:          form.description || null,
+      // RULE: price stored in cents — matches Peach Payments ZAR format
+      price_cents:          Math.round(parseFloat(form.price) * 100),
+      condition:            form.condition.toUpperCase(),
       category,
-      subcategory: form.subcategory || null,
-      price: Math.round(parseFloat(form.price) * 100),
-      condition: form.condition,
-      listing_type: form.listing_type,
-      is_school_specific: isSchoolSpecific,
-      school_id: selectedSchool?.id ?? null,
-      size: form.size || null,
-      gender: form.gender || null,
-      grade: form.grade ? parseInt(form.grade) : null,
-      description_part1: form.description || null,
-      images: imageUrls,
+      subcategory:          form.subcategory || null,
+      images:               imageUrls,
+      status:               'ACTIVE',
+      published_at:         new Date().toISOString(),
+
+      // Seller location snapshot (denormalized — never join needed at query time)
+      seller_province_code: prof?.province ?? null,
+      seller_city_id:       prof?.city_id ?? null,
+      seller_city_name:     prof?.city_name ?? null,
+      seller_suburb_id:     prof?.suburb_id ?? null,
+      seller_suburb_name:   prof?.suburb_name ?? null,
+      seller_school_id:     selectedSchool?.id ?? prof?.school_id ?? null,
+      seller_school_name:   selectedSchool?.name ?? prof?.school_name ?? null,
+
+      // Item attributes
+      is_school_specific:   isSchoolSpecific,
+      size:                 form.size || null,
+      gender:               form.gender || null,
+      grade:                form.grade ? parseInt(form.grade) : null,
+
+      // RULE: parcel dimensions required before listing can go ACTIVE
+      parcel_length_cm:     parcelDims!.lengthCm,
+      parcel_width_cm:      parcelDims!.widthCm,
+      parcel_height_cm:     parcelDims!.heightCm,
+      parcel_weight_kg:     parcelDims!.weightKg,
+
+      // RULE: at least one shipping method required before listing goes ACTIVE
+      shipping_methods:     shippingMethods,
     });
 
-    if (insertError) { setError('Error: ' + insertError.message); setLoading(false); return; }
-    setShowSuccess(true);
     setLoading(false);
+    if (insertError) { setError('Error: ' + insertError.message); return; }
+    setShowSuccess(true);
   };
 
   const nextStep = () => {
     if (step === 1 && !category) return;
-    if (step === 1 && !isSchoolSpecific) { setStep(3); return; }
     if (step === 1 && isSchoolSpecific) {
-      // Auto-select if user has exactly one saved school — skip step 2
-      if (profileSchools.length === 1) {
-        setSelectedSchool(profileSchools[0]);
-        setStep(3);
-        return;
-      }
+      if (profileSchools.length === 1) { setSelectedSchool(profileSchools[0]); setStep(3); return; }
       setStep(2); return;
     }
-    if (step < 4) setStep((step + 1) as Step);
+    if (step === 1) { setStep(3); return; }
+    if (step < 5) setStep((step + 1) as Step);
   };
 
   const prevStep = () => {
     if (step === 3 && !isSchoolSpecific) { setStep(1); return; }
-    // If step 2 was skipped (single profile school), go back to step 1
     if (step === 3 && isSchoolSpecific && profileSchools.length === 1) { setStep(1); return; }
     if (step > 1) setStep((step - 1) as Step);
   };
 
   const filteredSchools = schools.filter(s => s.name.toLowerCase().includes(schoolSearch.toLowerCase()));
-  const TOTAL_STEPS = isSchoolSpecific ? 4 : 3;
-  const currentStep = step === 1 ? 1 : step === 2 ? 2 : isSchoolSpecific ? step : step - 1;
+  const TOTAL_STEPS = isSchoolSpecific ? 5 : 4;
+  const displayStep = step === 1 ? 1 : step === 2 ? 2 : isSchoolSpecific ? step : step - 1;
 
   if (showSuccess) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
       <div className="text-center">
         <CheckCircle2 size={64} className="text-[#4757bf] mx-auto mb-6" strokeWidth={2} />
-        <h2 className="text-3xl font-bold text-[#111] mb-4">Listing Created!</h2>
-        <p className="text-[#979797] mb-10">Your item is now live on NextKid.</p>
+        <h2 className="text-3xl font-bold text-[#111] mb-4">Listing Live!</h2>
+        <p className="text-[#979797] mb-10">Your item is now active on NextKid.</p>
         <div className="flex gap-4 justify-center">
           <button onClick={() => router.push('/browse')} className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full font-medium transition">View in Browse</button>
           <button onClick={() => router.push('/dashboard')} className="border border-[#dedede] text-[#111] hover:bg-[#f4f4f4] px-8 py-3 rounded-full font-medium transition">Dashboard</button>
@@ -200,13 +250,13 @@ export default function NewListingPage() {
         {/* Progress bar */}
         <div className="flex gap-2 mb-8">
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <div key={i} className={`flex-1 h-1 rounded-full transition-colors ${i < currentStep ? 'bg-[#4757bf]' : 'bg-[#dedede]'}`} />
+            <div key={i} className={`flex-1 h-1 rounded-full transition-colors ${i < displayStep ? 'bg-[#4757bf]' : 'bg-[#dedede]'}`} />
           ))}
         </div>
 
         <div className="bg-white border border-[#dedede] rounded-2xl p-8 space-y-6 shadow-sm">
 
-          {/* Step 1 — Category */}
+          {/* ── Step 1 — Category ────────────────────────────────── */}
           {step === 1 && <>
             <div>
               <h2 className="text-[#111] font-semibold text-lg mb-1">What are you selling?</h2>
@@ -215,9 +265,7 @@ export default function NewListingPage() {
                 {ALL_CATEGORIES.map(cat => (
                   <button key={cat} type="button" onClick={() => setCategory(cat)}
                     className={`p-4 rounded-xl border-2 text-left transition flex items-start gap-3 ${
-                      category === cat
-                        ? 'border-[#4757bf] bg-[#eef0fb]'
-                        : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                      category === cat ? 'border-[#4757bf] bg-[#eef0fb]' : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
                     }`}>
                     <span className={`mt-0.5 ${category === cat ? 'text-[#4757bf]' : 'text-[#979797]'}`}>
                       {CATEGORY_ICON[cat] ?? <Package size={22} strokeWidth={2} />}
@@ -238,25 +286,22 @@ export default function NewListingPage() {
             </button>
           </>}
 
-          {/* Step 2 — School picker (school-specific only) */}
+          {/* ── Step 2 — School picker (school-specific only) ────── */}
           {step === 2 && isSchoolSpecific && <>
             <div>
               <h2 className="text-[#111] font-semibold text-lg mb-1">Which school is this for?</h2>
               <p className="text-[#979797] text-sm mb-6">
                 {profileSchools.length > 0
                   ? 'Select which of your schools this item belongs to.'
-                  : 'Uniform and sports kit listings are linked to a specific school so the right buyers see them.'}
+                  : 'Uniform and sports kit listings are linked to a school so the right buyers see them.'}
               </p>
 
               {profileSchools.length > 0 ? (
-                /* User has saved schools — show them as simple cards */
                 <div className="space-y-3">
                   {profileSchools.map(school => (
                     <button key={school.id} type="button" onClick={() => setSelectedSchool(school)}
                       className={`w-full p-4 rounded-xl border-2 text-left flex items-center justify-between transition ${
-                        selectedSchool?.id === school.id
-                          ? 'border-[#4757bf] bg-[#eef0fb]'
-                          : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                        selectedSchool?.id === school.id ? 'border-[#4757bf] bg-[#eef0fb]' : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
                       }`}>
                       <div className="flex items-center gap-3">
                         <School size={18} className={selectedSchool?.id === school.id ? 'text-[#4757bf]' : 'text-[#979797]'} />
@@ -274,10 +319,10 @@ export default function NewListingPage() {
                   </p>
                 </div>
               ) : (
-                /* No saved schools — full province + search flow */
                 <>
                   <label className={labelCls}>Province</label>
-                  <select className={`${inputCls} mb-4`} value={province} onChange={e => { setProvince(e.target.value); setSchoolSearch(''); setSelectedSchool(null); }}>
+                  <select className={`${inputCls} mb-4`} value={province}
+                    onChange={e => { setProvince(e.target.value); loadSchools(e.target.value); setSchoolSearch(''); setSelectedSchool(null); }}>
                     <option value="">Select province...</option>
                     {SA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
@@ -317,7 +362,6 @@ export default function NewListingPage() {
                 </>
               )}
             </div>
-
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={nextStep} disabled={!selectedSchool}
@@ -327,13 +371,14 @@ export default function NewListingPage() {
             </div>
           </>}
 
-          {/* Step 3 — Item details */}
+          {/* ── Step 3 — Item details ─────────────────────────────── */}
           {step === 3 && <>
             <h2 className="text-[#111] font-semibold text-lg mb-4">Item details</h2>
 
             <div>
               <label className={labelCls}>Title</label>
-              <input className={inputCls} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Grey flannel trousers size 32" />
+              <input className={inputCls} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+                placeholder="e.g. Grey flannel trousers size 32" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -347,12 +392,12 @@ export default function NewListingPage() {
               <div>
                 <label className={labelCls}>Condition</label>
                 <select className={inputCls} value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value as typeof LISTING_CONDITIONS[number] })}>
-                  {LISTING_CONDITIONS.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+                  {LISTING_CONDITIONS.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
                 </select>
               </div>
             </div>
 
-            {/* Context-aware fields — only show what makes sense for the chosen category */}
+            {/* Context-aware fields — only shown for relevant categories */}
             {(() => {
               const fields = CATEGORY_FIELDS[category] ?? {};
               return (
@@ -386,7 +431,7 @@ export default function NewListingPage() {
                       <label className={labelCls}>Shoe Size</label>
                       <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
                         <option value="">Select size...</option>
-                        {SHOE_SIZES.map(s => <option key={s} value={String(s)}>{s}</option>)}
+                        {SHOE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
                   )}
@@ -412,12 +457,15 @@ export default function NewListingPage() {
 
             <div>
               <label className={labelCls}>Price (Rands)</label>
-              <input type="number" className={inputCls} value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" />
+              <input type="number" className={inputCls} value={form.price}
+                onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" />
             </div>
 
             <div>
               <label className={labelCls}>Description</label>
-              <textarea className={`${inputCls} h-28 resize-none`} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Describe the item — condition, why you're selling, any defects..." />
+              <textarea className={`${inputCls} h-28 resize-none`} value={form.description}
+                onChange={e => setForm({ ...form, description: e.target.value })}
+                placeholder="Describe the item — condition, why you're selling, any defects..." />
             </div>
 
             <div className="flex gap-3">
@@ -429,8 +477,106 @@ export default function NewListingPage() {
             </div>
           </>}
 
-          {/* Step 4 — Photos & publish */}
+          {/* ── Step 4 — Parcel dimensions + Shipping methods ────── */}
           {step === 4 && <>
+            <div>
+              <h2 className="text-[#111] font-semibold text-lg mb-1">Parcel & Shipping</h2>
+              {/* RULE: parcel dimensions and at least one shipping method required before listing goes ACTIVE */}
+              <p className="text-[#979797] text-sm mb-6">
+                Required so buyers can get an accurate shipping quote at checkout.
+              </p>
+
+              {/* Parcel dimensions */}
+              <p className="text-[#111] text-sm font-medium mb-3">Parcel dimensions</p>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                {([
+                  { key: 'l', label: 'Length (cm)', placeholder: '30' },
+                  { key: 'w', label: 'Width (cm)',  placeholder: '20' },
+                  { key: 'h', label: 'Height (cm)', placeholder: '10' },
+                  { key: 'weight', label: 'Weight (kg)', placeholder: '0.5' },
+                ] as const).map(({ key, label, placeholder }) => (
+                  <div key={key}>
+                    <label className={labelCls}>{label}</label>
+                    <input type="number" min="0" step={key === 'weight' ? '0.1' : '1'}
+                      className={inputCls}
+                      value={parcel[key]}
+                      onChange={e => setParcel(p => ({ ...p, [key]: e.target.value }))}
+                      placeholder={placeholder} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Locker size indicator */}
+              {parcelComplete && (
+                <div className={`rounded-xl p-3 text-sm mb-6 flex items-center gap-2 ${
+                  fitsInLocker
+                    ? 'bg-[#f0fdf4] border border-[#bbf7d0] text-[#166534]'
+                    : 'bg-[#fffbeb] border border-[#fde68a] text-[#92400e]'
+                }`}>
+                  {fitsInLocker
+                    ? <>📦 Fits a <strong>{LOCKER_SIZE_LABELS[lockerSize!]} ({lockerSize})</strong> PUDO locker — both shipping options available</>
+                    : <>⚠ Too large for any PUDO locker — Door-to-Door only</>
+                  }
+                </div>
+              )}
+
+              {/* Shipping methods */}
+              <p className="text-[#111] text-sm font-medium mb-3">Shipping methods <span className="text-[#979797] font-normal">(select at least one)</span></p>
+              <div className="space-y-3">
+                {/* Door-to-Door — always available */}
+                <button type="button" onClick={() => toggleShipping('PICKUP')}
+                  className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
+                    shippingMethods.includes('PICKUP')
+                      ? 'border-[#4757bf] bg-[#eef0fb]'
+                      : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                  }`}>
+                  <Truck size={22} className={`mt-0.5 shrink-0 ${shippingMethods.includes('PICKUP') ? 'text-[#4757bf]' : 'text-[#979797]'}`} />
+                  <div>
+                    <p className="text-[#111] font-medium text-sm">Door-to-Door pickup</p>
+                    <p className="text-[#979797] text-xs mt-0.5">A courier collects directly from your address</p>
+                  </div>
+                  {shippingMethods.includes('PICKUP') && <CheckCircle2 size={18} className="text-[#4757bf] ml-auto shrink-0 mt-0.5" />}
+                </button>
+
+                {/* PUDO Locker — only shown if parcel fits */}
+                <button type="button"
+                  onClick={() => fitsInLocker && toggleShipping('PUDO_DROPOFF')}
+                  disabled={parcelComplete && !fitsInLocker}
+                  className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
+                    shippingMethods.includes('PUDO_DROPOFF')
+                      ? 'border-[#4757bf] bg-[#eef0fb]'
+                      : parcelComplete && !fitsInLocker
+                        ? 'border-[#dedede] bg-[#fafafa] opacity-50 cursor-not-allowed'
+                        : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                  }`}>
+                  <Box size={22} className={`mt-0.5 shrink-0 ${shippingMethods.includes('PUDO_DROPOFF') ? 'text-[#4757bf]' : 'text-[#979797]'}`} />
+                  <div>
+                    <p className="text-[#111] font-medium text-sm">PUDO Locker drop-off</p>
+                    <p className="text-[#979797] text-xs mt-0.5">
+                      {parcelComplete && !fitsInLocker
+                        ? 'Not available — parcel is too large for any locker'
+                        : lockerSize
+                          ? `Drop at your nearest TCG locker · Needs ${LOCKER_SIZE_LABELS[lockerSize]} (${lockerSize}) slot`
+                          : 'Drop at your nearest The Courier Guy locker'
+                      }
+                    </p>
+                  </div>
+                  {shippingMethods.includes('PUDO_DROPOFF') && <CheckCircle2 size={18} className="text-[#4757bf] ml-auto shrink-0 mt-0.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
+              <button onClick={nextStep} disabled={!parcelComplete || !shippingComplete}
+                className="flex-grow py-3 rounded-full bg-[#4757bf] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
+                Continue →
+              </button>
+            </div>
+          </>}
+
+          {/* ── Step 5 — Photos + Publish ─────────────────────────── */}
+          {step === 5 && <>
             <h2 className="text-[#111] font-semibold text-lg mb-4">Add photos</h2>
 
             <div className="border-2 border-dashed border-[#dedede] rounded-xl p-10 text-center hover:border-[#4757bf]/40 transition">
@@ -449,31 +595,35 @@ export default function NewListingPage() {
                 {imagePreviews.map((src, i) => (
                   <div key={i} className="relative">
                     <img src={src} className="w-20 h-20 object-cover rounded-xl border border-[#dedede]" alt="" />
-                    <button type="button" onClick={() => removeImage(i)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5"><X size={14} /></button>
+                    <button type="button" onClick={() => removeImage(i)}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5"><X size={14} /></button>
                   </div>
                 ))}
               </div>
             )}
 
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-
-            {/* Summary */}
+            {/* Summary card */}
             <div className="bg-[#f4f4f4] border border-[#dedede] rounded-xl p-4 text-sm space-y-1.5">
               <p className="text-[#979797]">Category: <span className="text-[#111] font-medium">{category}</span></p>
               {selectedSchool && <p className="text-[#979797]">School: <span className="text-[#111] font-medium">{selectedSchool.name}</span></p>}
               <p className="text-[#979797]">Title: <span className="text-[#111] font-medium">{form.title}</span></p>
               <p className="text-[#979797]">Price: <span className="text-[#4757bf] font-bold">R{form.price}</span></p>
               {form.size && <p className="text-[#979797]">Size: <span className="text-[#111] font-medium">{form.size}</span></p>}
+              <p className="text-[#979797]">Parcel: <span className="text-[#111] font-medium">{parcel.l}×{parcel.w}×{parcel.h} cm · {parcel.weight} kg</span></p>
+              <p className="text-[#979797]">Shipping: <span className="text-[#111] font-medium">{shippingMethods.join(', ')}</span></p>
             </div>
+
+            {error && <p className="text-red-500 text-sm">{error}</p>}
 
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={handleSubmit} disabled={loading || uploading}
                 className="flex-grow py-3 rounded-full bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
-                {loading ? 'Publishing...' : 'Publish Listing'}
+                {loading ? 'Publishing...' : 'Publish Listing 🚀'}
               </button>
             </div>
           </>}
+
         </div>
       </div>
     </div>

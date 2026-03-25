@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import {
@@ -107,23 +107,23 @@ export default function NewListingPage() {
       prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
     );
 
-  // Load profile schools on mount
-  useState(() => {
+  // Load profile school on mount — pre-populates step 2 with the user's saved school
+  useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
-      const { data: prof } = await supabase.from('profiles').select('school_ids, province').eq('id', user.id).single();
-      if (prof?.province) setProvince(prof.province);
-      if (prof?.school_ids?.length) {
-        const { data: saved } = await supabase.from('schools').select('*').in('id', prof.school_ids).order('name');
+      const { data: prof } = await supabase.from('profiles').select('school_id, province_code').eq('id', user.id).single();
+      if (prof?.province_code) setProvince(prof.province_code);
+      if (prof?.school_id) {
+        const { data: saved } = await supabase.from('schools').select('*').eq('id', prof.school_id);
         setProfileSchools((saved as SchoolType[]) ?? []);
       }
     });
-  });
+  }, []);
 
   const loadSchools = (prov: string) => {
     if (!prov) { setSchools([]); return; }
     setLoadingSchools(true);
-    supabase.from('schools').select('*').eq('province', prov).order('name')
+    supabase.from('schools').select('*').eq('province_code', prov).order('name')
       .then(({ data }) => { setSchools((data as SchoolType[]) ?? []); setLoadingSchools(false); });
   };
 
@@ -160,7 +160,7 @@ export default function NewListingPage() {
     if (!user) return;
 
     const { data: prof } = await supabase.from('profiles')
-      .select('province, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
+      .select('province_code, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
       .eq('id', user.id).single();
 
     // RULE: condition stored uppercase to match DB check constraint
@@ -178,7 +178,7 @@ export default function NewListingPage() {
       published_at:         new Date().toISOString(),
 
       // Seller location snapshot (denormalized — never join needed at query time)
-      seller_province_code: prof?.province ?? null,
+      seller_province_code: prof?.province_code ?? null,
       seller_city_id:       prof?.city_id ?? null,
       seller_city_name:     prof?.city_name ?? null,
       seller_suburb_id:     prof?.suburb_id ?? null,
@@ -307,7 +307,7 @@ export default function NewListingPage() {
                         <School size={18} className={selectedSchool?.id === school.id ? 'text-[#4757bf]' : 'text-[#979797]'} />
                         <div>
                           <p className="text-[#111] text-sm font-medium">{school.name}</p>
-                          <p className="text-[#979797] text-xs">{school.city}</p>
+                          <p className="text-[#979797] text-xs">{school.city_name}</p>
                         </div>
                       </div>
                       {selectedSchool?.id === school.id && <CheckCircle2 size={18} className="text-[#4757bf] shrink-0" />}
@@ -342,7 +342,7 @@ export default function NewListingPage() {
                               }`}>
                               <div>
                                 <p className="text-[#111] text-sm">{school.name}</p>
-                                <p className="text-[#979797] text-xs">{school.city} · {school.type}</p>
+                                <p className="text-[#979797] text-xs">{school.city_name} · {school.type}</p>
                               </div>
                               {selectedSchool?.id === school.id && <CheckCircle2 size={16} className="text-[#4757bf]" />}
                             </div>

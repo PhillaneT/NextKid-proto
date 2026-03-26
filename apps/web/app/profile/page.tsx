@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import {
   MapPin, School, CheckCircle2, AlertTriangle, Package,
-  Tag, Clock, ShoppingBag, Pencil, X, Check, Home,
+  Tag, Clock, ShoppingBag, Pencil, X, Check, Home, Search, LocateFixed,
 } from 'lucide-react';
 import Image from 'next/image';
 import { SA_PROVINCES } from '@nextkid/shared';
@@ -25,13 +25,15 @@ type Profile = {
   suburb_name: string | null;
   street_address: string | null;
   postal_code: string | null;
+  preferred_locker_id: string | null;
+  preferred_locker_name: string | null;
+  preferred_locker_address: string | null;
   school_ids: string[] | null;
   school_id: string | null;
   school_name: string | null;
 };
 
-type SchoolRow = { id: string; name: string; city_name: string };
-type GlobalSchoolResult = { id: string; name: string; city_name: string; province_code: string };
+type SchoolRow = { id: string; name: string; city_name: string; province_code?: string };
 
 type CityOption   = { id: string; name: string };
 type SuburbOption = { id: string; name: string; postal_code?: string };
@@ -101,12 +103,11 @@ export default function ProfilePage() {
   const [loading, setLoading]               = useState(true);
   const [tab, setTab]                       = useState<'active' | 'sold'>('active');
 
-  // ── Edit state ───────────────────────────────────────────────────────────────
-  const [editing, setEditing]               = useState(false);
+  // ── Address edit state ────────────────────────────────────────────────────────
+  const [editingAddress, setEditingAddress] = useState(false);
   const [editName, setEditName]             = useState('');
   const [editStreet, setEditStreet]         = useState('');
-
-  // Location cascade
+  const [editPostalCode, setEditPostalCode] = useState('');
   const [editProvince, setEditProvince]     = useState('');
   const [cities, setCities]                 = useState<CityOption[]>([]);
   const [editCityId, setEditCityId]         = useState('');
@@ -114,27 +115,34 @@ export default function ProfilePage() {
   const [suburbs, setSuburbs]               = useState<SuburbOption[]>([]);
   const [editSuburbId, setEditSuburbId]     = useState('');
   const [editSuburbName, setEditSuburbName] = useState('');
-  const [editPostalCode, setEditPostalCode] = useState('');
   const [loadingCities, setLoadingCities]   = useState(false);
   const [loadingSuburbs, setLoadingSuburbs] = useState(false);
+  const [savingAddress, setSavingAddress]   = useState(false);
+  const [addressError, setAddressError]     = useState('');
 
-  // School multi-select
-  const [editSchoolIds, setEditSchoolIds]       = useState<string[]>([]);
-  const [editSchools, setEditSchools]           = useState<SchoolRow[]>([]);
-  const [schoolSearch, setSchoolSearch]         = useState('');
-  const [suburbSchools, setSuburbSchools]       = useState<SchoolRow[]>([]);
-  const [loadingSchools, setLoadingSchools]     = useState(false);
-  // Global school search (for schools outside current suburb/province)
-  const [globalQuery, setGlobalQuery]           = useState('');
-  const [globalResults, setGlobalResults]       = useState<GlobalSchoolResult[]>([]);
-  const [searchingGlobal, setSearchingGlobal]   = useState(false);
-
-  const [saving, setSaving]                 = useState(false);
-  const [saveError, setSaveError]           = useState('');
+  // ── Locker edit state ─────────────────────────────────────────────────────────
+  type LockerResult = { id: string; name: string; address: string }
+  const [editLockerId, setEditLockerId]         = useState('');
+  const [editLockerName, setEditLockerName]     = useState('');
+  const [editLockerAddress, setEditLockerAddress] = useState('');
+  const [lockerQuery, setLockerQuery]           = useState('');
+  const [lockerResults, setLockerResults]       = useState<LockerResult[]>([]);
+  const [searchingLockers, setSearchingLockers] = useState(false);
 
   // Suppress cascade resets when location is pre-filled from profile
   const skipProvinceRef = useRef('');
   const skipCityRef     = useRef('');
+
+  // ── Schools edit state ────────────────────────────────────────────────────────
+  // RULE: schools are independent of delivery address — a user can follow schools
+  // in any province (e.g. a parent with kids at different schools across SA).
+  const [editingSchools, setEditingSchools] = useState(false);
+  const [editSchools, setEditSchools]       = useState<SchoolRow[]>([]);
+  const [schoolQuery, setSchoolQuery]       = useState('');
+  const [schoolResults, setSchoolResults]   = useState<SchoolRow[]>([]);
+  const [searchingSchools, setSearchingSchools] = useState(false);
+  const [savingSchools, setSavingSchools]   = useState(false);
+  const [schoolsError, setSchoolsError]     = useState('');
 
   // ── Load profile ──────────────────────────────────────────────────────────────
   useEffect(() => { load(); }, []);
@@ -156,7 +164,7 @@ export default function ProfilePage() {
 
     if (prof.school_ids?.length) {
       const { data: schoolData } = await supabase
-        .from('schools').select('id, name, city_name').in('id', prof.school_ids);
+        .from('schools').select('id, name, city_name, province_code').in('id', prof.school_ids);
       setSchools(schoolData ?? []);
     }
 
@@ -188,46 +196,48 @@ export default function ProfilePage() {
     setEditSuburbId(''); setEditSuburbName('');
   }, [editCityId]);
 
-  // ── Schools: reload when suburb changes ──────────────────────────────────────
+  // ── School search: debounced national search ──────────────────────────────────
   useEffect(() => {
-    if (!editSuburbId) { setSuburbSchools([]); return; }
-    setLoadingSchools(true);
-    fetch(`/api/locations/schools?suburbId=${encodeURIComponent(editSuburbId)}`)
-      .then(r => r.json())
-      .then(data => { setSuburbSchools(Array.isArray(data) ? data : []); setLoadingSchools(false); })
-      .catch(() => { setSuburbSchools([]); setLoadingSchools(false); });
-  }, [editSuburbId]);
-
-  // ── Global school search (debounced, cross-province) ─────────────────────────
-  useEffect(() => {
-    if (!globalQuery || globalQuery.length < 2) { setGlobalResults([]); return; }
+    if (!schoolQuery || schoolQuery.length < 2) { setSchoolResults([]); return; }
     const timer = setTimeout(async () => {
-      setSearchingGlobal(true);
+      setSearchingSchools(true);
       const { data } = await supabase
         .from('schools')
         .select('id, name, city_name, province_code')
-        .ilike('name', `%${globalQuery}%`)
+        .ilike('name', `%${schoolQuery}%`)
         .limit(10);
-      setGlobalResults((data ?? []) as GlobalSchoolResult[]);
-      setSearchingGlobal(false);
+      setSchoolResults((data ?? []) as SchoolRow[]);
+      setSearchingSchools(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [globalQuery]);
+  }, [schoolQuery]);
 
-  // ── Start editing ─────────────────────────────────────────────────────────────
-  async function startEdit() {
+  // ── Locker search: debounced, queries our server-side proxy ─────────────────
+  useEffect(() => {
+    if (!lockerQuery || lockerQuery.length < 2) { setLockerResults([]); return; }
+    const timer = setTimeout(async () => {
+      setSearchingLockers(true);
+      const res = await fetch(`/api/lockers/search?q=${encodeURIComponent(lockerQuery)}`);
+      const data = await res.json() as LockerResult[];
+      setLockerResults(Array.isArray(data) ? data : []);
+      setSearchingLockers(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [lockerQuery]);
+
+  // ── Address editing ───────────────────────────────────────────────────────────
+  async function startEditAddress() {
     if (!profile) return;
     setEditName(profile.full_name ?? '');
     setEditStreet(profile.street_address ?? '');
     setEditPostalCode(profile.postal_code ?? '');
-    // Use DB-verified schools as source of truth (not profile.school_ids which may have stale IDs)
-    setEditSchools(schools);
-    setEditSchoolIds(schools.map(s => s.id));
-    setSchoolSearch('');
-    setGlobalQuery('');
-    setSaveError('');
+    setEditLockerId(profile.preferred_locker_id ?? '');
+    setEditLockerName(profile.preferred_locker_name ?? '');
+    setEditLockerAddress(profile.preferred_locker_address ?? '');
+    setLockerQuery('');
+    setLockerResults([]);
+    setAddressError('');
 
-    // Pre-fill location cascade — use skip refs to avoid cascade resets
     if (profile.province && profile.city_id && profile.suburb_id) {
       const [citiesRes, suburbsRes] = await Promise.all([
         fetch(`/api/locations/cities?province=${encodeURIComponent(profile.province)}`).then(r => r.json()),
@@ -244,65 +254,94 @@ export default function ProfilePage() {
     setEditCityName(profile.city_name ?? '');
     setEditSuburbId(profile.suburb_id ?? '');
     setEditSuburbName(profile.suburb_name ?? '');
-    setEditing(true);
+    setEditingAddress(true);
   }
 
-  function cancelEdit() { setEditing(false); setSaveError(''); }
-
-  function toggleSchool(school: SchoolRow) {
-    const already = editSchoolIds.includes(school.id);
-    if (already) {
-      setEditSchoolIds(prev => prev.filter(id => id !== school.id));
-      setEditSchools(prev => prev.filter(s => s.id !== school.id));
-    } else {
-      setEditSchoolIds(prev => [...prev, school.id]);
-      setEditSchools(prev => [...prev, school]);
-    }
-    setGlobalQuery('');
-    setGlobalResults([]);
-  }
-
-  async function saveEdit() {
+  async function saveAddress() {
     if (!profile || !editName.trim()) return;
-    setSaving(true);
-    setSaveError('');
+    setSavingAddress(true);
+    setAddressError('');
 
     const { error } = await supabase.from('profiles').update({
-      full_name:    editName.trim(),
-      province:     editProvince || null,
-      city_id:      editCityId   || null,
-      city_name:    editCityName || null,
-      suburb_id:    editSuburbId   || null,
-      suburb_name:  editSuburbName || null,
-      street_address: editStreet.trim() || null,
-      postal_code:  editPostalCode.trim() || null,
-      // RULE: derive school_ids from editSchools (DB-verified) to avoid FK violations
-      school_ids:   editSchools.map(s => s.id),
-      school_id:    editSchools[0]?.id ?? null,
-      school_name:  editSchools[0]?.name ?? null,
+      full_name:               editName.trim(),
+      province:                editProvince   || null,
+      city_id:                 editCityId     || null,
+      city_name:               editCityName   || null,
+      suburb_id:               editSuburbId   || null,
+      suburb_name:             editSuburbName || null,
+      street_address:          editStreet.trim()        || null,
+      postal_code:             editPostalCode.trim()    || null,
+      preferred_locker_id:     editLockerId             || null,
+      preferred_locker_name:   editLockerName           || null,
+      preferred_locker_address: editLockerAddress       || null,
     }).eq('id', profile.id);
 
     if (error) {
-      setSaveError('Error saving profile: ' + error.message);
+      setAddressError('Error saving: ' + error.message);
     } else {
       setProfile(prev => prev ? {
         ...prev,
-        full_name:     editName.trim(),
-        province:      editProvince || null,
-        city_id:       editCityId   || null,
-        city_name:     editCityName || null,
-        suburb_id:     editSuburbId   || null,
-        suburb_name:   editSuburbName || null,
-        street_address: editStreet.trim() || null,
-        postal_code:   editPostalCode.trim() || null,
-        school_ids:    editSchools.map(s => s.id),
-        school_id:     editSchools[0]?.id ?? null,
-        school_name:   editSchools[0]?.name ?? null,
+        full_name:               editName.trim(),
+        province:                editProvince   || null,
+        city_id:                 editCityId     || null,
+        city_name:               editCityName   || null,
+        suburb_id:               editSuburbId   || null,
+        suburb_name:             editSuburbName || null,
+        street_address:          editStreet.trim()        || null,
+        postal_code:             editPostalCode.trim()    || null,
+        preferred_locker_id:     editLockerId             || null,
+        preferred_locker_name:   editLockerName           || null,
+        preferred_locker_address: editLockerAddress       || null,
+      } : prev);
+      setEditingAddress(false);
+    }
+    setSavingAddress(false);
+  }
+
+  // ── Schools editing ───────────────────────────────────────────────────────────
+  function startEditSchools() {
+    setEditSchools(schools);
+    setSchoolQuery('');
+    setSchoolResults([]);
+    setSchoolsError('');
+    setEditingSchools(true);
+  }
+
+  function toggleSchool(school: SchoolRow) {
+    setEditSchools(prev => {
+      const already = prev.some(s => s.id === school.id);
+      return already ? prev.filter(s => s.id !== school.id) : [...prev, school];
+    });
+    setSchoolQuery('');
+    setSchoolResults([]);
+  }
+
+  async function saveSchools() {
+    if (!profile) return;
+    setSavingSchools(true);
+    setSchoolsError('');
+
+    const { error } = await supabase.from('profiles').update({
+      // RULE: school_ids is the multi-school array; school_id/school_name are the
+      // primary school (first in list) used for legacy queries and display.
+      school_ids:  editSchools.map(s => s.id),
+      school_id:   editSchools[0]?.id   ?? null,
+      school_name: editSchools[0]?.name ?? null,
+    }).eq('id', profile.id);
+
+    if (error) {
+      setSchoolsError('Error saving: ' + error.message);
+    } else {
+      setProfile(prev => prev ? {
+        ...prev,
+        school_ids:  editSchools.map(s => s.id),
+        school_id:   editSchools[0]?.id   ?? null,
+        school_name: editSchools[0]?.name ?? null,
       } : prev);
       setSchools(editSchools);
-      setEditing(false);
+      setEditingSchools(false);
     }
-    setSaving(false);
+    setSavingSchools(false);
   }
 
   const signOut = async () => { await supabase.auth.signOut(); router.push('/'); };
@@ -313,309 +352,397 @@ export default function ProfilePage() {
 
   const initials = profile?.full_name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() ?? '?';
   const displayListings = tab === 'active' ? activeListings : soldListings;
+
   return (
     <div className="min-h-screen bg-white">
-      <div className="max-w-4xl mx-auto px-6 py-10">
+      <div className="max-w-4xl mx-auto px-6 py-10 space-y-6">
 
-        {/* Profile card */}
-        <div className="bg-[#f4f4f4] rounded-3xl p-6 mb-8">
-          <div className="flex flex-col sm:flex-row items-start gap-6">
-
-            {/* Avatar */}
-            <div className="w-20 h-20 rounded-full bg-[#4757bf] flex items-center justify-center shrink-0">
-              <span className="text-white text-2xl font-bold">{initials}</span>
+        {/* ── Profile header ──────────────────────────────────────────────────── */}
+        <div className="bg-[#f4f4f4] rounded-3xl p-6">
+          <div className="flex items-start gap-5">
+            <div className="w-16 h-16 rounded-full bg-[#4757bf] flex items-center justify-center shrink-0">
+              <span className="text-white text-xl font-bold">{initials}</span>
             </div>
-
-            {/* View or edit */}
             <div className="flex-1 min-w-0">
-              {editing ? (
-
-                <div className="space-y-4">
-                  {/* Name */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Full name</label>
-                    <input
-                      value={editName}
-                      onChange={e => setEditName(e.target.value)}
-                      className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
-                      placeholder="Your full name"
-                    />
-                  </div>
-
-                  {/* Province */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Province</label>
-                    <select
-                      value={editProvince}
-                      onChange={e => setEditProvince(e.target.value)}
-                      className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
-                    >
-                      <option value="">Select province...</option>
-                      {SA_PROVINCES.map(p => <option key={p}>{p}</option>)}
-                    </select>
-                  </div>
-
-                  {/* City */}
-                  {editProvince && (
-                    <div>
-                      <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">City</label>
-                      <select
-                        value={editCityId}
-                        onChange={e => {
-                          const opt = cities.find(c => c.id === e.target.value);
-                          setEditCityId(e.target.value);
-                          setEditCityName(opt?.name ?? '');
-                        }}
-                        disabled={loadingCities}
-                        className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition disabled:opacity-50"
-                      >
-                        <option value="">{loadingCities ? 'Loading...' : 'Select city...'}</option>
-                        {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* Suburb */}
-                  {editCityId && (
-                    <div>
-                      <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Suburb</label>
-                      <select
-                        value={editSuburbId}
-                        onChange={e => {
-                          const opt = suburbs.find(s => s.id === e.target.value);
-                          setEditSuburbId(e.target.value);
-                          setEditSuburbName(opt?.name ?? '');
-                          if (opt?.postal_code) setEditPostalCode(opt.postal_code);
-                        }}
-                        disabled={loadingSuburbs}
-                        className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition disabled:opacity-50"
-                      >
-                        <option value="">{loadingSuburbs ? 'Loading...' : 'Select suburb...'}</option>
-                        {suburbs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* Street address */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">
-                      Street address <span className="text-[#dedede] font-normal normal-case">(for door-to-door delivery)</span>
-                    </label>
-                    <input
-                      value={editStreet}
-                      onChange={e => setEditStreet(e.target.value)}
-                      className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
-                      placeholder="e.g. 12 Main Street, Apt 4"
-                    />
-                  </div>
-
-                  {/* Postal code */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Postal code</label>
-                    <input
-                      value={editPostalCode}
-                      onChange={e => setEditPostalCode(e.target.value)}
-                      className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
-                      placeholder="e.g. 2196"
-                      inputMode="numeric"
-                    />
-                  </div>
-
-                  {/* Schools (multi-select, loaded by suburb) */}
-                  {editSuburbId && (
-                    <div>
-                      <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">
-                        Schools <span className="text-[#dedede] font-normal normal-case">(optional — select all that apply)</span>
-                      </label>
-
-                      {/* Selected school chips */}
-                      {editSchools.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {editSchools.map(s => (
-                            <span key={s.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#eef0fb] border border-[#c7d2fe] text-[#4757bf] text-xs font-semibold rounded-full">
-                              {s.name}
-                              <button onClick={() => toggleSchool(s)} className="hover:text-red-500 transition">
-                                <X size={11} strokeWidth={2.5} />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Search filter */}
-                      <input
-                        value={schoolSearch}
-                        onChange={e => setSchoolSearch(e.target.value)}
-                        className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition mb-2"
-                        placeholder="Search school name..."
-                        disabled={loadingSchools}
-                      />
-
-                      {/* Scrollable school list */}
-                      <div className="border border-[#dedede] rounded-xl overflow-hidden max-h-44 overflow-y-auto bg-white">
-                        {loadingSchools ? (
-                          <p className="text-[#979797] text-sm text-center py-3">Loading...</p>
-                        ) : suburbSchools.filter(s =>
-                            s.name.toLowerCase().includes(schoolSearch.toLowerCase())
-                          ).length === 0 ? (
-                          <p className="text-[#979797] text-sm text-center py-3">
-                            {suburbSchools.length === 0 ? 'No schools in this suburb yet.' : 'No match — try a different search.'}
-                          </p>
-                        ) : suburbSchools.filter(s =>
-                            s.name.toLowerCase().includes(schoolSearch.toLowerCase())
-                          ).map(s => {
-                            const selected = editSchoolIds.includes(s.id);
-                            return (
-                              <button
-                                key={s.id}
-                                onClick={() => toggleSchool(s)}
-                                className={`w-full flex items-center justify-between px-4 py-2.5 text-left border-b border-[#f4f4f4] last:border-0 transition ${selected ? 'bg-[#eef0fb]' : 'hover:bg-[#f4f4f4]'}`}
-                              >
-                                <div>
-                                  <span className={`text-sm font-semibold ${selected ? 'text-[#4757bf]' : 'text-[#111]'}`}>{s.name}</span>
-                                  <span className="block text-xs text-[#979797]">{s.city_name}</span>
-                                </div>
-                                {selected && <Check size={14} strokeWidth={2.5} className="text-[#4757bf] shrink-0" />}
-                              </button>
-                            );
-                          })
-                        }
-                      </div>
-
-                      {/* Global school search — for schools outside current suburb */}
-                      <div className="mt-3">
-                        <p className="text-xs text-[#979797] mb-1.5">School not listed? Search across all areas:</p>
-                        <div className="relative">
-                          <input
-                            value={globalQuery}
-                            onChange={e => setGlobalQuery(e.target.value)}
-                            className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
-                            placeholder="e.g. Rondebosch Boys, St John's..."
-                          />
-                          {globalQuery.length >= 2 && (
-                            <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#dedede] rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                              {searchingGlobal ? (
-                                <p className="text-[#979797] text-sm text-center py-3">Searching...</p>
-                              ) : globalResults.filter(r => !editSchoolIds.includes(r.id)).length === 0 ? (
-                                <p className="text-[#979797] text-sm text-center py-3">No schools found</p>
-                              ) : globalResults.filter(r => !editSchoolIds.includes(r.id)).map(r => (
-                                <button
-                                  key={r.id}
-                                  onClick={() => toggleSchool(r)}
-                                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-[#f4f4f4] transition border-b border-[#f4f4f4] last:border-0"
-                                >
-                                  <div>
-                                    <span className="text-sm font-semibold text-[#111]">{r.name}</span>
-                                    <span className="block text-xs text-[#979797]">{r.city_name} · {r.province_code}</span>
-                                  </div>
-                                  <Check size={13} strokeWidth={2.5} className="text-[#4757bf] shrink-0 opacity-0" />
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {saveError && <p className="text-red-500 text-sm">{saveError}</p>}
-                </div>
-
-              ) : (
-                <>
-                  <h1 className="text-2xl font-bold text-[#111]">{profile?.full_name}</h1>
-                  <p className="text-[#979797] text-sm mt-0.5">{profile?.email}</p>
-
-                  <div className="flex flex-wrap gap-3 mt-3">
-                    {/* Location breadcrumb */}
-                    {(profile?.suburb_name || profile?.city_name || profile?.province) && (
-                      <span className="inline-flex items-center gap-1.5 text-sm text-[#555]">
-                        <MapPin size={14} strokeWidth={2} className="text-[#4757bf]" />
-                        {[profile.suburb_name, profile.city_name, profile.province].filter(Boolean).join(', ')}
-                      </span>
-                    )}
-
-                    {/* Street address */}
-                    {profile?.street_address && (
-                      <span className="inline-flex items-center gap-1.5 text-sm text-[#555]">
-                        <Home size={14} strokeWidth={2} className="text-[#4757bf]" />
-                        {profile.street_address}{profile.postal_code ? `, ${profile.postal_code}` : ''}
-                      </span>
-                    )}
-
-                    {/* Schools */}
-                    {schools.map(s => (
-                      <span key={s.id} className="inline-flex items-center gap-1.5 text-sm text-[#555]">
-                        <School size={14} strokeWidth={2} className="text-[#4757bf]" />
-                        {s.name}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {profile?.is_age_verified ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#f0fdf4] border border-[#bbf7d0] text-green-700 text-xs font-semibold">
-                        <CheckCircle2 size={12} strokeWidth={2.5} /> Verified 18+
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#fffbeb] border border-[#fde68a] text-yellow-700 text-xs font-semibold">
-                        <AlertTriangle size={12} strokeWidth={2.5} /> Browse only
-                      </span>
-                    )}
-                    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-[#f0f4ff] border border-[#c7d2fe] text-[#4757bf] text-xs font-semibold capitalize">
-                      {profile?.role?.replace('_', ' ')}
-                    </span>
-                    {!profile?.street_address && (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#fffbeb] border border-[#fde68a] text-yellow-700 text-xs font-semibold">
-                        <Home size={12} strokeWidth={2.5} /> No delivery address
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
+              <h1 className="text-xl font-bold text-[#111]">{profile?.full_name}</h1>
+              <p className="text-[#979797] text-sm mt-0.5">{profile?.email}</p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {profile?.is_age_verified ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#f0fdf4] border border-[#bbf7d0] text-green-700 text-xs font-semibold">
+                    <CheckCircle2 size={12} strokeWidth={2.5} /> Verified 18+
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#fffbeb] border border-[#fde68a] text-yellow-700 text-xs font-semibold">
+                    <AlertTriangle size={12} strokeWidth={2.5} /> Browse only
+                  </span>
+                )}
+              </div>
             </div>
-
-            {/* Action buttons */}
-            <div className="flex flex-col gap-2 shrink-0">
-              {editing ? (
-                <>
-                  <button
-                    onClick={saveEdit}
-                    disabled={saving || !editName.trim()}
-                    className="flex items-center gap-2 px-5 py-2 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition"
-                  >
-                    <Check size={14} strokeWidth={2.5} />
-                    {saving ? 'Saving...' : 'Save'}
-                  </button>
-                  <button
-                    onClick={cancelEdit}
-                    className="flex items-center gap-2 px-5 py-2 border border-[#dedede] text-[#979797] rounded-full text-sm transition hover:border-[#979797]"
-                  >
-                    <X size={14} strokeWidth={2} /> Cancel
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={startEdit}
-                    className="flex items-center gap-2 px-5 py-2 border border-[#dedede] hover:border-[#4757bf] text-[#111] hover:text-[#4757bf] rounded-full text-sm transition"
-                  >
-                    <Pencil size={14} strokeWidth={2} /> Edit profile
-                  </button>
-                  <button
-                    onClick={signOut}
-                    className="px-5 py-2 border border-[#dedede] rounded-full text-sm text-[#979797] hover:border-red-300 hover:text-red-400 transition"
-                  >
-                    Sign out
-                  </button>
-                </>
-              )}
-            </div>
+            <button
+              onClick={signOut}
+              className="shrink-0 px-4 py-2 border border-[#dedede] rounded-full text-sm text-[#979797] hover:border-red-300 hover:text-red-400 transition"
+            >
+              Sign out
+            </button>
           </div>
         </div>
 
-        {/* Stats row */}
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        {/* ── Delivery Address card ────────────────────────────────────────────── */}
+        <div className="bg-[#f4f4f4] rounded-3xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-base font-bold text-[#111]">Delivery Address</h2>
+              <p className="text-xs text-[#979797] mt-0.5">Used for door-to-door deliveries when you buy.</p>
+            </div>
+            {!editingAddress && (
+              <button
+                onClick={startEditAddress}
+                className="flex items-center gap-1.5 px-4 py-2 border border-[#dedede] hover:border-[#4757bf] text-[#111] hover:text-[#4757bf] rounded-full text-sm transition"
+              >
+                <Pencil size={13} strokeWidth={2} /> Edit
+              </button>
+            )}
+          </div>
+
+          {editingAddress ? (
+            <div className="space-y-4">
+              {/* Name */}
+              <div>
+                <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Full name</label>
+                <input
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                  placeholder="Your full name"
+                />
+              </div>
+
+              {/* Province */}
+              <div>
+                <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Province</label>
+                <select
+                  value={editProvince}
+                  onChange={e => setEditProvince(e.target.value)}
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                >
+                  <option value="">Select province...</option>
+                  {SA_PROVINCES.map(p => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+
+              {/* City */}
+              {editProvince && (
+                <div>
+                  <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">City</label>
+                  <select
+                    value={editCityId}
+                    onChange={e => {
+                      const opt = cities.find(c => c.id === e.target.value);
+                      setEditCityId(e.target.value);
+                      setEditCityName(opt?.name ?? '');
+                    }}
+                    disabled={loadingCities}
+                    className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition disabled:opacity-50"
+                  >
+                    <option value="">{loadingCities ? 'Loading...' : 'Select city...'}</option>
+                    {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* Suburb */}
+              {editCityId && (
+                <div>
+                  <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Suburb</label>
+                  <select
+                    value={editSuburbId}
+                    onChange={e => {
+                      const opt = suburbs.find(s => s.id === e.target.value);
+                      setEditSuburbId(e.target.value);
+                      setEditSuburbName(opt?.name ?? '');
+                      if (opt?.postal_code) setEditPostalCode(opt.postal_code);
+                    }}
+                    disabled={loadingSuburbs}
+                    className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition disabled:opacity-50"
+                  >
+                    <option value="">{loadingSuburbs ? 'Loading...' : 'Select suburb...'}</option>
+                    {suburbs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* Street address */}
+              <div>
+                <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">
+                  Street address <span className="text-[#dedede] font-normal normal-case">(optional)</span>
+                </label>
+                <input
+                  value={editStreet}
+                  onChange={e => setEditStreet(e.target.value)}
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                  placeholder="e.g. 12 Main Street, Apt 4"
+                />
+              </div>
+
+              {/* Postal code */}
+              <div>
+                <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Postal code</label>
+                <input
+                  value={editPostalCode}
+                  onChange={e => setEditPostalCode(e.target.value)}
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                  placeholder="e.g. 0157"
+                  inputMode="numeric"
+                />
+              </div>
+
+              {/* ── Preferred PUDO locker ──────────────────────────────────── */}
+              <div className="pt-2 border-t border-[#ebebeb]">
+                <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-0.5">
+                  Preferred PUDO Locker <span className="font-normal normal-case text-[#c0c0c0]">(optional)</span>
+                </label>
+                <p className="text-xs text-[#979797] mb-2">
+                  Add a locker near you to unlock cheaper locker-delivery options at checkout.
+                </p>
+
+                {/* Currently selected locker chip */}
+                {editLockerId && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#eef0fb] border border-[#c7d2fe] text-[#4757bf] text-xs font-semibold rounded-full">
+                      <LocateFixed size={11} strokeWidth={2.5} />
+                      {editLockerName}
+                      <button type="button" onClick={() => { setEditLockerId(''); setEditLockerName(''); setEditLockerAddress(''); }} className="hover:text-red-500 transition ml-0.5">
+                        <X size={11} strokeWidth={2.5} />
+                      </button>
+                    </span>
+                  </div>
+                )}
+
+                {/* Search for a locker */}
+                {!editLockerId && (
+                  <div className="relative">
+                    <Search size={15} strokeWidth={2} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#979797]" />
+                    <input
+                      value={lockerQuery}
+                      onChange={e => setLockerQuery(e.target.value)}
+                      className="w-full bg-white border border-[#dedede] rounded-xl pl-9 pr-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                      placeholder="Search by locker name or area, e.g. Rivonia, Fourways..."
+                    />
+                    {lockerQuery.length >= 2 && (
+                      <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#dedede] rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                        {searchingLockers ? (
+                          <p className="text-[#979797] text-sm text-center py-3">Searching…</p>
+                        ) : lockerResults.length === 0 ? (
+                          <p className="text-[#979797] text-sm text-center py-3">No lockers found for &ldquo;{lockerQuery}&rdquo;</p>
+                        ) : lockerResults.map(l => (
+                          <button
+                            type="button"
+                            key={l.id}
+                            onClick={() => {
+                              setEditLockerId(l.id);
+                              setEditLockerName(l.name);
+                              setEditLockerAddress(l.address);
+                              setLockerQuery('');
+                              setLockerResults([]);
+                            }}
+                            className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-[#f4f4f4] transition border-b border-[#f4f4f4] last:border-0"
+                          >
+                            <div>
+                              <span className="text-sm font-semibold text-[#111]">{l.name}</span>
+                              <span className="block text-xs text-[#979797]">{l.address}</span>
+                            </div>
+                            <LocateFixed size={13} strokeWidth={2} className="text-[#4757bf] shrink-0 ml-2" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {addressError && <p className="text-red-500 text-sm">{addressError}</p>}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={saveAddress}
+                  disabled={savingAddress || !editName.trim()}
+                  className="flex items-center gap-2 px-5 py-2 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition"
+                >
+                  <Check size={14} strokeWidth={2.5} />
+                  {savingAddress ? 'Saving...' : 'Save address'}
+                </button>
+                <button
+                  onClick={() => setEditingAddress(false)}
+                  className="flex items-center gap-2 px-5 py-2 border border-[#dedede] text-[#979797] rounded-full text-sm transition hover:border-[#979797]"
+                >
+                  <X size={14} strokeWidth={2} /> Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(profile?.suburb_name || profile?.city_name || profile?.province) ? (
+                <div className="flex items-center gap-2 text-sm text-[#555]">
+                  <MapPin size={14} strokeWidth={2} className="text-[#4757bf] shrink-0" />
+                  {[profile.suburb_name, profile.city_name, profile.province].filter(Boolean).join(', ')}
+                </div>
+              ) : (
+                <p className="text-sm text-[#979797] italic">No location set</p>
+              )}
+              {profile?.street_address ? (
+                <div className="flex items-center gap-2 text-sm text-[#555]">
+                  <Home size={14} strokeWidth={2} className="text-[#4757bf] shrink-0" />
+                  {profile.street_address}{profile.postal_code ? `, ${profile.postal_code}` : ''}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#fffbeb] border border-[#fde68a] text-yellow-700 text-xs font-semibold">
+                    <Home size={12} strokeWidth={2.5} /> No street address — door-to-door delivery unavailable
+                  </span>
+                </div>
+              )}
+              {/* PUDO locker preference (view) */}
+              {profile?.preferred_locker_id ? (
+                <div className="flex items-center gap-2 text-sm text-[#555]">
+                  <LocateFixed size={14} strokeWidth={2} className="text-[#4757bf] shrink-0" />
+                  <span>
+                    <span className="font-semibold">{profile.preferred_locker_name}</span>
+                    {profile.preferred_locker_address && (
+                      <span className="text-[#979797]"> · {profile.preferred_locker_address}</span>
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#f4f4f4] border border-[#dedede] text-[#979797] text-xs">
+                    <LocateFixed size={11} strokeWidth={2} /> No preferred PUDO locker set
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── My Schools card ──────────────────────────────────────────────────── */}
+        {/* RULE: schools are independent of delivery location. A parent or student  */}
+        {/* can follow schools in any province. The homepage shows items from all    */}
+        {/* followed schools, sorted by newest.                                      */}
+        <div className="bg-[#f4f4f4] rounded-3xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-base font-bold text-[#111]">My Schools</h2>
+              <p className="text-xs text-[#979797] mt-0.5">Items from these schools appear first on your home feed.</p>
+            </div>
+            {!editingSchools && (
+              <button
+                onClick={startEditSchools}
+                className="flex items-center gap-1.5 px-4 py-2 border border-[#dedede] hover:border-[#4757bf] text-[#111] hover:text-[#4757bf] rounded-full text-sm transition"
+              >
+                <Pencil size={13} strokeWidth={2} /> Edit
+              </button>
+            )}
+          </div>
+
+          {editingSchools ? (
+            <div className="space-y-4">
+              {/* Selected school chips */}
+              {editSchools.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {editSchools.map(s => (
+                    <span key={s.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#eef0fb] border border-[#c7d2fe] text-[#4757bf] text-xs font-semibold rounded-full">
+                      <School size={11} strokeWidth={2.5} />
+                      {s.name}
+                      {s.province_code && <span className="font-normal text-[#7c8fd4]">· {s.province_code}</span>}
+                      <button type="button" onClick={() => toggleSchool(s)} className="hover:text-red-500 transition ml-0.5">
+                        <X size={11} strokeWidth={2.5} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* National school search */}
+              <div>
+                <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">
+                  Search any school in South Africa
+                </label>
+                <div className="relative">
+                  <Search size={15} strokeWidth={2} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#979797]" />
+                  <input
+                    value={schoolQuery}
+                    onChange={e => setSchoolQuery(e.target.value)}
+                    className="w-full bg-white border border-[#dedede] rounded-xl pl-9 pr-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                    placeholder="e.g. Grey College, Hoërskool Eldoraigne..."
+                  />
+                  {schoolQuery.length >= 2 && (
+                    <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#dedede] rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                      {searchingSchools ? (
+                        <p className="text-[#979797] text-sm text-center py-3">Searching...</p>
+                      ) : schoolResults.filter(r => !editSchools.some(es => es.id === r.id)).length === 0 ? (
+                        <p className="text-[#979797] text-sm text-center py-3">No schools found for &ldquo;{schoolQuery}&rdquo;</p>
+                      ) : schoolResults.filter(r => !editSchools.some(es => es.id === r.id)).map(r => (
+                        <button
+                          type="button"
+                          key={r.id}
+                          onClick={() => toggleSchool(r)}
+                          className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-[#f4f4f4] transition border-b border-[#f4f4f4] last:border-0"
+                        >
+                          <div>
+                            <span className="text-sm font-semibold text-[#111]">{r.name}</span>
+                            <span className="block text-xs text-[#979797]">{r.city_name}{r.province_code ? ` · ${r.province_code}` : ''}</span>
+                          </div>
+                          <Check size={13} strokeWidth={2.5} className="text-[#4757bf] shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {editSchools.length === 0 && (
+                <p className="text-xs text-[#979797]">No schools added yet — search above to add one.</p>
+              )}
+
+              {schoolsError && <p className="text-red-500 text-sm">{schoolsError}</p>}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={saveSchools}
+                  disabled={savingSchools}
+                  className="flex items-center gap-2 px-5 py-2 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition"
+                >
+                  <Check size={14} strokeWidth={2.5} />
+                  {savingSchools ? 'Saving...' : 'Save schools'}
+                </button>
+                <button
+                  onClick={() => setEditingSchools(false)}
+                  className="flex items-center gap-2 px-5 py-2 border border-[#dedede] text-[#979797] rounded-full text-sm transition hover:border-[#979797]"
+                >
+                  <X size={14} strokeWidth={2} /> Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {schools.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {schools.map(s => (
+                    <span key={s.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#dedede] text-[#111] text-sm rounded-full">
+                      <School size={13} strokeWidth={2} className="text-[#4757bf]" />
+                      {s.name}
+                      {s.province_code && <span className="text-xs text-[#979797]">· {s.province_code}</span>}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-[#979797] italic">No schools added — tap Edit to add your school(s).</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Stats row ────────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-3 gap-4">
           <div className="bg-[#f4f4f4] rounded-2xl p-4 text-center">
             <p className="text-2xl font-bold text-[#4757bf]">{activeListings.length}</p>
             <p className="text-xs text-[#979797] mt-1 flex items-center justify-center gap-1"><Tag size={12} strokeWidth={2} /> Live listings</p>
@@ -632,45 +759,47 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Listings tabs */}
-        <div className="flex border-b border-[#dedede] mb-6">
-          {(['active', 'sold'] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`relative px-5 py-3 text-sm font-medium transition ${tab === t ? 'text-[#111]' : 'text-[#979797] hover:text-[#111]'}`}
-            >
-              {t === 'active' ? `Live listings (${activeListings.length})` : `Sold (${soldListings.length})`}
-              {tab === t && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4757bf] rounded-full" />}
-            </button>
-          ))}
-        </div>
-
-        {displayListings.length === 0 ? (
-          <div className="text-center py-16">
-            <Package size={48} strokeWidth={1.5} className="text-[#dedede] mx-auto mb-4" />
-            <p className="text-[#111] font-semibold">
-              {tab === 'active' ? 'No active listings' : 'Nothing sold yet'}
-            </p>
-            <p className="text-[#979797] text-sm mt-1">
-              {tab === 'active' ? 'Head to Sell to create your first listing.' : 'Your sold items will appear here.'}
-            </p>
-            {tab === 'active' && (
+        {/* ── Listings tabs ─────────────────────────────────────────────────────── */}
+        <div>
+          <div className="flex border-b border-[#dedede] mb-6">
+            {(['active', 'sold'] as const).map(t => (
               <button
-                onClick={() => router.push('/sell/new')}
-                className="mt-4 px-6 py-2 bg-[#4757bf] text-white rounded-full text-sm font-semibold hover:bg-[#3a48a8] transition"
+                key={t}
+                onClick={() => setTab(t)}
+                className={`relative px-5 py-3 text-sm font-medium transition ${tab === t ? 'text-[#111]' : 'text-[#979797] hover:text-[#111]'}`}
               >
-                + Create listing
+                {t === 'active' ? `Live listings (${activeListings.length})` : `Sold (${soldListings.length})`}
+                {tab === t && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4757bf] rounded-full" />}
               </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {displayListings.map(item => (
-              <ListingCard key={item.id} item={item} onClick={() => router.push(`/item/${item.id}`)} />
             ))}
           </div>
-        )}
+
+          {displayListings.length === 0 ? (
+            <div className="text-center py-16">
+              <Package size={48} strokeWidth={1.5} className="text-[#dedede] mx-auto mb-4" />
+              <p className="text-[#111] font-semibold">
+                {tab === 'active' ? 'No active listings' : 'Nothing sold yet'}
+              </p>
+              <p className="text-[#979797] text-sm mt-1">
+                {tab === 'active' ? 'Head to Sell to create your first listing.' : 'Your sold items will appear here.'}
+              </p>
+              {tab === 'active' && (
+                <button
+                  onClick={() => router.push('/sell/new')}
+                  className="mt-4 px-6 py-2 bg-[#4757bf] text-white rounded-full text-sm font-semibold hover:bg-[#3a48a8] transition"
+                >
+                  + Create listing
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {displayListings.map(item => (
+                <ListingCard key={item.id} item={item} onClick={() => router.push(`/item/${item.id}`)} />
+              ))}
+            </div>
+          )}
+        </div>
 
       </div>
     </div>

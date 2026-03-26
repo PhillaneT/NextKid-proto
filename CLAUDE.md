@@ -14,6 +14,17 @@ Features include escrow-based payments via Peach Payments, in-app chat, dispute 
 
 ---
 
+## Known Prototype Trade-offs (Fix at AWS Migration)
+
+These are conscious, documented shortcuts made during the prototype. Do not "fix" them before the AWS migration — they are not bugs.
+
+### `profiles.school_ids` is `text[]`, not `uuid[]`
+- **Why:** Seed school data uses slug IDs (`school_011`, `school_012`, etc.) instead of UUIDs. The `school_ids` column was originally `uuid[]`, which caused a type mismatch. Migration `005_school_ids_text_array.sql` changed it to `text[]` to unblock the prototype.
+- **At AWS migration:** Real SA school data (from Dept. of Basic Education) will be imported with `gen_random_uuid()` IDs. At that point, change `school_ids` back to `uuid[]`, update `school_id` to `uuid references schools(id)`, and reseed. The rest of the schema (listings, profiles) already uses UUIDs correctly.
+- **Do not add FK constraint** to `school_ids text[]` — it cannot reference a table. Referential integrity on the primary school is enforced via `school_id text references schools(id)`.
+
+---
+
 ## Post-Prototype Backlog
 > These features are intentionally deferred until the prototype is approved. Do not build them now.
 

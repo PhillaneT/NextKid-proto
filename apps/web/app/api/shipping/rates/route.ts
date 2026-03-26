@@ -52,17 +52,18 @@ function profileToTCGAddress(profile: ProfileAddressRow): TCGAddress {
 
 async function fetchTCGRates(
   collectionAddress: TCGAddress | TCGLockerAddress,
-  deliveryAddress: TCGAddress,
+  deliveryAddress: TCGAddress | TCGLockerAddress,
   parcels: ReturnType<typeof dimensionsToTCGParcel>[]
 ): Promise<TCGRateOption[]> {
   const today = new Date().toISOString()
   const sevenDaysOut = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
+  // RULE: TCG API key must never be exposed client-side — server-only route.
+  // Timeout after 8s so the route never hangs and returns an empty body to the client.
   const res = await fetch(`${process.env.TCG_API_BASE_URL}/rates`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // RULE: TCG API key must never be exposed client-side — server-only route
       Authorization: `Bearer ${process.env.TCG_API_KEY}`,
     },
     body: JSON.stringify({
@@ -72,6 +73,7 @@ async function fetchTCGRates(
       collection_min_date: today,
       delivery_min_date: sevenDaysOut,
     }),
+    signal: AbortSignal.timeout(8000),
   })
 
   if (!res.ok) {
@@ -86,6 +88,17 @@ async function fetchTCGRates(
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    return await handleRates(req)
+  } catch (err) {
+    // RULE: Never let an unhandled exception return an empty body — always return JSON.
+    // This wraps unexpected failures (TCG API timeout, malformed data, etc.)
+    console.error('Unhandled error in /api/shipping/rates:', err)
+    return NextResponse.json({ error: 'shipping_unavailable' }, { status: 503 })
+  }
+}
+
+async function handleRates(req: NextRequest) {
   // 1. Parse and validate body
   let body: unknown
   try {
@@ -158,23 +171,24 @@ export async function POST(req: NextRequest) {
     .eq('id', listing.seller_id)
     .single()
 
-  if (sellerError || !sellerProfile || !sellerProfile.street_address) {
-    return NextResponse.json(
-      { error: 'shipping_unavailable', message: 'Seller shipping address is unavailable.' },
-      { status: 503 }
-    )
-  }
+  // If seller has no street address we can't get real quotes — skip to demo fallback.
+  // RULE: before go-live, re-enable the hard check so listings without a seller
+  // address can't be purchased (seller must add address before listing goes live).
+  const sellerHasAddress = !sellerError && sellerProfile?.street_address
 
-  // 5. Fetch buyer profile for delivery address
+  // 5. Fetch buyer profile for delivery address + preferred locker
   const { data: buyerProfile, error: buyerError } = await serverClient
     .from('profiles')
-    .select('street_address, suburb_name, city_name, province, postal_code, latitude, longitude')
+    .select('street_address, suburb_name, city_name, province, postal_code, latitude, longitude, preferred_locker_id, preferred_locker_name')
     .eq('id', buyerId)
     .single()
 
-  if (buyerError || !buyerProfile || !buyerProfile.street_address) {
+  // If buyer has no street address they need to add one before buying.
+  // Direct them to their profile rather than failing silently.
+  const buyerHasAddress = !buyerError && buyerProfile?.street_address
+  if (!buyerHasAddress) {
     return NextResponse.json(
-      { error: 'profile_incomplete', message: 'Please complete your delivery address in your profile.' },
+      { error: 'no_delivery_address', message: 'Please add a delivery address to your profile before buying.' },
       { status: 400 }
     )
   }
@@ -189,15 +203,18 @@ export async function POST(req: NextRequest) {
     },
     'Marketplace item'
   )
-  const sellerTCGAddress = profileToTCGAddress(sellerProfile)
-  const buyerTCGAddress = profileToTCGAddress(buyerProfile)
+  const sellerTCGAddress = sellerProfile ? profileToTCGAddress(sellerProfile) : null
+  const buyerTCGAddress = profileToTCGAddress(buyerProfile!)
 
-  // 7. Fan out TCG rate calls — one per seller shipping method
-  type RateCallResult = { method: 'D2D' | 'L2D'; rates: TCGRateOption[] }
+  // 7. Fan out TCG rate calls — only if seller has an address; otherwise falls
+  // through to demo quotes below.
+  type RateCallResult = { method: 'D2D' | 'D2L' | 'L2D' | 'L2L'; rates: TCGRateOption[] }
 
   const calls: Promise<RateCallResult>[] = []
+  const buyerLockerId = buyerProfile?.preferred_locker_id ?? null
+  const buyerLockerName = buyerProfile?.preferred_locker_name ?? undefined
 
-  if (shippingMethods.includes('PICKUP')) {
+  if (sellerHasAddress && sellerTCGAddress && shippingMethods.includes('PICKUP')) {
     // D2D: seller's home address → buyer's home address
     calls.push(
       fetchTCGRates(sellerTCGAddress, buyerTCGAddress, [parcel]).then((rates) => ({
@@ -205,21 +222,39 @@ export async function POST(req: NextRequest) {
         rates,
       }))
     )
+
+    // D2L: seller's home address → buyer's preferred locker
+    if (buyerLockerId) {
+      const buyerLockerAddress: TCGLockerAddress = { terminal_id: buyerLockerId }
+      calls.push(
+        fetchTCGRates(sellerTCGAddress, buyerLockerAddress, [parcel]).then((rates) => ({
+          method: 'D2L' as const,
+          rates,
+        }))
+      )
+    }
   }
 
-  if (shippingMethods.includes('PUDO_DROPOFF') && listing.pudo_locker_id) {
+  if (sellerHasAddress && shippingMethods.includes('PUDO_DROPOFF') && listing.pudo_locker_id) {
     // L2D: seller drops at locker → buyer's home address
-    const lockerAddress: TCGLockerAddress = { terminal_id: listing.pudo_locker_id }
+    const sellerLockerAddress: TCGLockerAddress = { terminal_id: listing.pudo_locker_id }
     calls.push(
-      fetchTCGRates(lockerAddress, buyerTCGAddress, [parcel]).then((rates) => ({
+      fetchTCGRates(sellerLockerAddress, buyerTCGAddress, [parcel]).then((rates) => ({
         method: 'L2D' as const,
         rates,
       }))
     )
-  }
 
-  if (calls.length === 0) {
-    return NextResponse.json({ error: 'no_shipping_methods' }, { status: 400 })
+    // L2L: seller drops at their locker → buyer collects from their locker
+    if (buyerLockerId) {
+      const buyerLockerAddress: TCGLockerAddress = { terminal_id: buyerLockerId }
+      calls.push(
+        fetchTCGRates(sellerLockerAddress, buyerLockerAddress, [parcel]).then((rates) => ({
+          method: 'L2L' as const,
+          rates,
+        }))
+      )
+    }
   }
 
   const results = await Promise.allSettled(calls)
@@ -243,11 +278,18 @@ export async function POST(req: NextRequest) {
         estimatedCollectionDate: new Date(rate.collection_date),
         estimatedDeliveryFrom: new Date(rate.delivery_date_from),
         estimatedDeliveryTo: new Date(rate.delivery_date_to),
-        // For L2D, populate collection locker details
-        ...(method === 'L2D' && listing.pudo_locker_id
+        // For L2D / L2L: seller drops at their locker
+        ...((method === 'L2D' || method === 'L2L') && listing.pudo_locker_id
           ? {
               collectionLockerCode: listing.pudo_locker_id,
               collectionLockerName: listing.pudo_locker_name ?? undefined,
+            }
+          : {}),
+        // For D2L / L2L: buyer collects from their preferred locker
+        ...((method === 'D2L' || method === 'L2L') && buyerLockerId
+          ? {
+              deliveryLockerCode: buyerLockerId,
+              deliveryLockerName: buyerLockerName,
             }
           : {}),
         rawResponse: rate,
@@ -255,9 +297,38 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 9. If no quotes at all, all calls failed
+  // 9. If TCG returned nothing, fall back to demo quotes so checkout is always demoable.
+  // PROTOTYPE TRADE-OFF: remove demo fallback before go-live and surface the real error.
   if (quotes.length === 0) {
-    return NextResponse.json({ error: 'shipping_unavailable' }, { status: 503 })
+    const now = new Date()
+    const d = (days: number) => new Date(now.getTime() + days * 86_400_000).toISOString()
+    const demoQuotes: ShippingQuote[] = [
+      {
+        quoteId: crypto.randomUUID(),
+        method: 'D2D',
+        serviceLevelCode: 'ECO',
+        serviceLevelName: 'Economy (3–5 days)',
+        rate: 142.31,
+        rateExcludingVat: 123.75,
+        vatAmount: 18.56,
+        estimatedCollectionDate: new Date(d(1)),
+        estimatedDeliveryFrom:   new Date(d(3)),
+        estimatedDeliveryTo:     new Date(d(5)),
+      },
+      {
+        quoteId: crypto.randomUUID(),
+        method: 'D2D',
+        serviceLevelCode: 'OVN',
+        serviceLevelName: 'Overnight',
+        rate: 205.56,
+        rateExcludingVat: 178.75,
+        vatAmount: 26.81,
+        estimatedCollectionDate: new Date(d(1)),
+        estimatedDeliveryFrom:   new Date(d(2)),
+        estimatedDeliveryTo:     new Date(d(2)),
+      },
+    ]
+    return NextResponse.json({ quotes: demoQuotes, itemPriceCents: listing.price_cents, demo: true })
   }
 
   // Sort cheapest first

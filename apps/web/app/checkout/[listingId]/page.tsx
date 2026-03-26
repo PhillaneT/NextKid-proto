@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { ArrowLeft, Lock, Package, Truck, MapPin, Loader2 } from 'lucide-react'
+import { ArrowLeft, Lock, Package, Truck, MapPin, Loader2, Home } from 'lucide-react'
 import type { ShippingQuote } from '@nextkid/shared'
 
 type CheckoutListing = {
@@ -79,7 +79,22 @@ export default function CheckoutPage() {
       }
       setListing(listingData)
 
-      // 3. Fetch shipping quotes
+      // 3. Pre-check: does the buyer have a street address?
+      // We check this client-side so the user always sees a clear, actionable
+      // message rather than a generic server error.
+      const { data: buyerProfile } = await supabase
+        .from('profiles')
+        .select('street_address')
+        .eq('id', session.user.id)
+        .single()
+
+      if (!buyerProfile?.street_address) {
+        setErrorCode('no_delivery_address')
+        setStep('error')
+        return
+      }
+
+      // 4. Fetch shipping quotes
       const res = await fetch('/api/shipping/rates', {
         method: 'POST',
         headers: {
@@ -89,13 +104,14 @@ export default function CheckoutPage() {
         body: JSON.stringify({ listingId }),
       })
 
-      const json = await res.json() as { quotes?: ShippingQuote[]; itemPriceCents?: number; error?: string; message?: string }
+      let json: { quotes?: ShippingQuote[]; itemPriceCents?: number; error?: string; message?: string } = {}
+      try { json = await res.json() } catch { /* empty body — treat as server error */ }
 
       if (!res.ok) {
         const code = json.error ?? 'unknown'
-        if (code === 'profile_incomplete') {
-          // TODO: pass return URL once onboarding supports it
-          router.push('/onboarding')
+        if (code === 'profile_incomplete' || code === 'no_delivery_address') {
+          setErrorCode('no_delivery_address')
+          setStep('error')
           return
         }
         setErrorCode(code)
@@ -150,7 +166,8 @@ export default function CheckoutPage() {
       }),
     })
 
-    const json = await res.json() as { orderId?: string; error?: string }
+    let json: { orderId?: string; error?: string } = {}
+    try { json = await res.json() } catch { /* empty body */ }
 
     if (!res.ok) {
       if (json.error === 'listing_no_longer_available') {
@@ -168,26 +185,65 @@ export default function CheckoutPage() {
 
   // ─── Error state ──────────────────────────────────────────────────────────
   if (step === 'error') {
-    const messages: Record<string, string> = {
-      listing_not_found: 'This listing no longer exists.',
-      listing_unavailable: 'This item is not available for purchase.',
-      cannot_buy_own_item: 'You cannot buy your own listing.',
-      listing_no_longer_available: 'This item was just sold — sorry! Browse for something similar.',
-      shipping_unavailable: 'Shipping quotes are temporarily unavailable. Please try again.',
-      no_shipping_methods: 'This item has no shipping options configured.',
-    }
-    const message = errorMessage ?? messages[errorCode ?? ''] ?? 'Something went wrong. Please try again.'
+    const isAddressError = errorCode === 'no_delivery_address'
 
     return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-        <div style={{ background: '#fff', borderRadius: '16px', padding: '32px', maxWidth: '480px', width: '100%', textAlign: 'center' }}>
-          <p style={{ fontSize: '16px', color: '#555', marginBottom: '24px' }}>{message}</p>
-          <button
-            onClick={() => router.back()}
-            style={{ background: '#4757bf', color: '#fff', border: 'none', borderRadius: '12px', padding: '12px 24px', fontSize: '15px', fontWeight: 600, cursor: 'pointer' }}
-          >
-            Go back
-          </button>
+      <div className="min-h-screen bg-[#f5f5f5] flex items-center justify-center px-6 py-10">
+        <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center shadow-sm">
+          {isAddressError ? (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-5">
+                <MapPin size={26} strokeWidth={1.5} className="text-amber-500" />
+              </div>
+              <h2 className="text-lg font-bold text-[#111] mb-2">Almost there — just add your delivery info</h2>
+              <p className="text-sm text-[#555] mb-4">
+                To get this item shipped to you, we need a street address.
+                You can also save a preferred PUDO locker if you&apos;d rather
+                collect nearby — it&apos;s usually cheaper!
+              </p>
+              <div className="bg-[#f4f4f4] rounded-xl p-3 mb-6 text-left text-xs text-[#555] space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <Home size={13} strokeWidth={2} className="text-[#4757bf] mt-0.5 shrink-0" />
+                  <span><strong className="text-[#111]">Street address</strong> — for door-to-door delivery</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <MapPin size={13} strokeWidth={2} className="text-[#4757bf] mt-0.5 shrink-0" />
+                  <span><strong className="text-[#111]">PUDO locker</strong> — collect at a locker near you (often cheaper)</span>
+                </div>
+              </div>
+              <button
+                onClick={() => router.push('/profile')}
+                className="w-full py-3 bg-[#4757bf] hover:bg-[#3a48a8] text-white rounded-full font-semibold text-sm transition mb-3"
+              >
+                Update my delivery info →
+              </button>
+              <button
+                onClick={() => router.back()}
+                className="w-full py-3 border border-[#dedede] text-[#979797] rounded-full text-sm hover:border-[#979797] transition"
+              >
+                Go back
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-[#555] mb-6 text-sm">
+                {errorMessage ?? {
+                  listing_not_found:           'This listing no longer exists.',
+                  listing_unavailable:         'This item is not available for purchase.',
+                  cannot_buy_own_item:         'You cannot buy your own listing.',
+                  listing_no_longer_available: 'This item was just sold — sorry!',
+                  shipping_unavailable:        'Shipping quotes are temporarily unavailable. Please try again.',
+                  no_shipping_methods:         'This item has no shipping options configured.',
+                }[errorCode ?? ''] ?? 'Something went wrong. Please try again.'}
+              </p>
+              <button
+                onClick={() => router.back()}
+                className="px-8 py-3 bg-[#4757bf] hover:bg-[#3a48a8] text-white rounded-full font-semibold text-sm transition"
+              >
+                Go back
+              </button>
+            </>
+          )}
         </div>
       </div>
     )
@@ -305,7 +361,8 @@ export default function CheckoutPage() {
                         </p>
                         <p style={{ fontSize: '12px', color: '#888', margin: '2px 0 0' }}>
                           Est. {formatDateRange(quote.estimatedDeliveryFrom, quote.estimatedDeliveryTo)}
-                          {quote.collectionLockerName ? ` · Drop at: ${quote.collectionLockerName}` : ''}
+                          {quote.collectionLockerName ? ` · Seller drops at: ${quote.collectionLockerName}` : ''}
+                          {quote.deliveryLockerName ? ` · You collect at: ${quote.deliveryLockerName}` : ''}
                         </p>
                       </div>
                     </div>

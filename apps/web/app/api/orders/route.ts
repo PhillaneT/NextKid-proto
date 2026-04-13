@@ -14,6 +14,9 @@ const CreateOrderSchema = z.object({
     estimatedDeliveryFrom: z.string(), // ISO string
     estimatedDeliveryTo: z.string(),
   }),
+  // RULE: buyer's chosen PUDO locker — required for D2L and L2L shipments, null otherwise
+  buyerLockerId:   z.string().nullable().optional(),
+  buyerLockerName: z.string().nullable().optional(),
 })
 
 export async function POST(req: NextRequest) {
@@ -29,7 +32,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid_body', message: parsed.error.message }, { status: 400 })
   }
-  const { listingId, selectedQuote } = parsed.data
+  const { listingId, selectedQuote, buyerLockerId, buyerLockerName } = parsed.data
 
   // 2. Authenticate the buyer
   const authHeader = req.headers.get('Authorization') ?? ''
@@ -92,6 +95,9 @@ export async function POST(req: NextRequest) {
       // RULE: Lock the quoted shipping price at order creation — never recalculate
       quoted_rate_cents: shippingCostCents,
       estimated_delivery: selectedQuote.estimatedDeliveryTo,
+      // RULE: snapshot buyer's chosen locker at order time for D2L / L2L shipment booking
+      delivery_locker_id:   buyerLockerId   ?? null,
+      delivery_locker_name: buyerLockerName ?? null,
     })
     .select('id')
     .single()

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { SEED_LOCKERS } from '../seed'
 
 // RULE: TCG API key must never be exposed client-side — server-only route.
 // This route proxies locker search so the key stays server-side.
@@ -63,8 +64,14 @@ export async function GET(req: NextRequest) {
       .slice(0, 12)
     return NextResponse.json(matches)
   } catch (err) {
-    console.error('Locker search error:', err)
-    // Return empty rather than erroring — locker selection is optional
-    return NextResponse.json([])
+    console.error('Locker search error — falling back to seed list:', err)
+    // PROTOTYPE FALLBACK: TCG API not yet activated for this account.
+    // Search the seed list so locker selection works during development.
+    // RULE: Remove this fallback once TCG activates the API key.
+    const lower = q.toLowerCase()
+    const matches = SEED_LOCKERS
+      .filter(l => l.name.toLowerCase().includes(lower) || l.address.toLowerCase().includes(lower))
+      .slice(0, 12)
+    return NextResponse.json(matches)
   }
 }

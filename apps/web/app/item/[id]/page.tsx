@@ -1,11 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useParams } from 'next/navigation';
-import { Pencil, Trash2, X, Check, Heart, MapPin, ShoppingBag, School as SchoolIcon } from 'lucide-react';
-import { ALL_CATEGORIES, SUBCATEGORIES, LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES, SCHOOL_SPECIFIC_CATEGORIES } from '@nextkid/shared';
-import type { ListingCategory, School } from '@nextkid/shared';
+import { Pencil, Trash2, X, Check, Heart, MapPin, ShoppingBag, School as SchoolIcon, Truck, Box, CheckCircle2 } from 'lucide-react';
+import { ALL_CATEGORIES, SUBCATEGORIES, LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES, SCHOOL_SPECIFIC_CATEGORIES, getLockerSizeForParcel, canFitInLocker } from '@nextkid/shared';
+import type { ListingCategory, School, SellerShippingOption, ParcelDimensions } from '@nextkid/shared';
+import LockerMapPicker from '../../components/LockerMapPicker';
+import type { SelectedLocker } from '../../components/LockerMapPicker';
+
+const LOCKER_SIZE_LABELS: Record<string, string> = {
+  'V4-XS': 'Extra Small', 'V4-S': 'Small', 'V4-M': 'Medium', 'V4-L': 'Large', 'V4-XL': 'Extra Large',
+};
 
 type Item = {
   id: string;
@@ -24,6 +30,13 @@ type Item = {
   grade: number | null;
   condition: string | null;
   status: string;
+  shipping_methods: string[];
+  parcel_length_cm: number | null;
+  parcel_width_cm: number | null;
+  parcel_height_cm: number | null;
+  parcel_weight_kg: number | null;
+  pudo_locker_id: string | null;
+  pudo_locker_name: string | null;
 };
 
 type Offer = {
@@ -52,7 +65,6 @@ export default function ItemPage() {
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   const [isOwner, setIsOwner] = useState(false);
-  const [isAgeVerified, setIsAgeVerified] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [liked, setLiked] = useState(false);
@@ -97,6 +109,33 @@ export default function ItemPage() {
   const [editSchoolSearch, setEditSchoolSearch] = useState('');
   const [loadingEditSchools, setLoadingEditSchools] = useState(false);
   const [showSchoolPicker, setShowSchoolPicker] = useState(false);
+
+  // Shipping edit state — mirrors the sell wizard's step 4
+  const [editParcel, setEditParcel] = useState({ l: '', w: '', h: '', weight: '' });
+  const [editShippingMethods, setEditShippingMethods] = useState<SellerShippingOption[]>([]);
+  const [editPudoLockerId, setEditPudoLockerId]       = useState('');
+  const [editPudoLockerName, setEditPudoLockerName]   = useState('');
+  const [editPudoLockerAddress, setEditPudoLockerAddress] = useState('');
+  const [editSellerSuburb, setEditSellerSuburb] = useState('');
+  const [editSellerCity, setEditSellerCity]     = useState('');
+
+  const editParcelDims = useMemo<ParcelDimensions | null>(() => {
+    const l = parseFloat(editParcel.l), w = parseFloat(editParcel.w);
+    const h = parseFloat(editParcel.h), weight = parseFloat(editParcel.weight);
+    if ([l, w, h, weight].some(isNaN) || [l, w, h, weight].some(v => v <= 0)) return null;
+    return { lengthCm: l, widthCm: w, heightCm: h, weightKg: weight };
+  }, [editParcel]);
+  const editLockerSize    = editParcelDims ? getLockerSizeForParcel(editParcelDims) : null;
+  const editFitsInLocker  = editParcelDims ? canFitInLocker(editParcelDims) : false;
+
+  const toggleEditShipping = (method: SellerShippingOption) => {
+    setEditShippingMethods(prev =>
+      prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
+    );
+    if (method === 'PUDO_DROPOFF' && editShippingMethods.includes('PUDO_DROPOFF')) {
+      setEditPudoLockerId(''); setEditPudoLockerName(''); setEditPudoLockerAddress('');
+    }
+  };
 
   const handleEditImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -149,9 +188,21 @@ export default function ItemPage() {
       supabase.from('schools').select('name').eq('id', data.seller_school_id).single()
         .then(({ data: s }) => { if (s) setEditSchoolName(s.name); });
     }
+    // Pre-populate shipping edit state from the fetched listing
+    setEditParcel({
+      l:      data.parcel_length_cm != null ? String(data.parcel_length_cm) : '',
+      w:      data.parcel_width_cm  != null ? String(data.parcel_width_cm)  : '',
+      h:      data.parcel_height_cm != null ? String(data.parcel_height_cm) : '',
+      weight: data.parcel_weight_kg != null ? String(data.parcel_weight_kg) : '',
+    });
+    setEditShippingMethods((data.shipping_methods ?? []) as SellerShippingOption[]);
+    setEditPudoLockerId(data.pudo_locker_id ?? '');
+    setEditPudoLockerName(data.pudo_locker_name ?? '');
+    setEditPudoLockerAddress('');
+
     // Fetch seller stats (province + sold count) and school name for school-specific items
     const [{ data: sellerProfile }, { count: soldCount }, { data: schoolRow }] = await Promise.all([
-      supabase.from('profiles').select('province').eq('id', data.seller_id).single(),
+      supabase.from('profiles').select('province, suburb_name, city_name').eq('id', data.seller_id).single(),
       supabase.from('listings').select('*', { count: 'exact', head: true }).eq('seller_id', data.seller_id).eq('status', 'COMPLETED'),
       data.seller_school_id
         ? supabase.from('schools').select('name').eq('id', data.seller_school_id).single()
@@ -159,6 +210,8 @@ export default function ItemPage() {
     ]);
     setSellerProvince(sellerProfile?.province ?? null);
     setSellerSoldCount(soldCount ?? 0);
+    if (sellerProfile?.suburb_name) setEditSellerSuburb(sellerProfile.suburb_name);
+    if (sellerProfile?.city_name)   setEditSellerCity(sellerProfile.city_name);
     setViewSchoolName(schoolRow?.name ?? null);
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -167,8 +220,6 @@ export default function ItemPage() {
       setCurrentUserId(user.id);
       const owner = user.id === data.seller_id;
       setIsOwner(owner);
-      const { data: profileData } = await supabase.from('profiles').select('is_age_verified').eq('id', user.id).single();
-      setIsAgeVerified(profileData?.is_age_verified || false);
     } else {
       fetchHighestBid(data.id);
     }
@@ -210,6 +261,14 @@ export default function ItemPage() {
       is_school_specific: editForm.is_school_specific,
       seller_school_id: editForm.is_school_specific ? editSchoolId : null,
       images: editImageUrls,
+      // Shipping fields
+      shipping_methods:  editShippingMethods,
+      parcel_length_cm:  editParcelDims?.lengthCm  ?? null,
+      parcel_width_cm:   editParcelDims?.widthCm   ?? null,
+      parcel_height_cm:  editParcelDims?.heightCm  ?? null,
+      parcel_weight_kg:  editParcelDims?.weightKg  ?? null,
+      pudo_locker_id:    editPudoLockerId   || null,
+      pudo_locker_name:  editPudoLockerName || null,
     }).eq('id', item!.id);
     if (error) alert('Error saving: ' + error.message);
     else { await fetchItem(); setIsEditing(false); }
@@ -304,7 +363,7 @@ export default function ItemPage() {
         <div className="text-6xl mb-4">📦</div>
         <h2 className="text-2xl font-bold text-[#111] mb-2">Item not found</h2>
         <p className="text-[#979797] mb-6">This listing may have been removed.</p>
-        <button onClick={() => router.push('/browse')} className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full font-medium transition">Back to Browse</button>
+        <button onClick={() => router.push('/browse')} className="bg-[#BE1E2D] hover:bg-[#9B1824] text-white px-8 py-3 rounded-full font-medium transition">Back to Browse</button>
       </div>
     </div>
   );
@@ -317,14 +376,14 @@ export default function ItemPage() {
 
         {/* Top bar */}
         <div className="flex items-center justify-between mb-8">
-          <button onClick={() => router.push('/browse')} className="text-[#979797] hover:text-[#4757bf] flex items-center gap-1 text-sm transition">
+          <button onClick={() => router.push('/browse')} className="text-[#979797] hover:text-[#BE1E2D] flex items-center gap-1 text-sm transition">
             ← Back to Browse
           </button>
           <div className="flex items-center gap-3">
             {isOwner && !isEditing && (
               <>
                 <button onClick={() => { setIsEditing(true); setEditImagePreviews(item.images || []); setEditImageUrls(item.images || []); }}
-                  className="flex items-center gap-2 px-4 py-2 border border-[#dedede] hover:border-[#4757bf] text-[#111] rounded-full transition text-sm">
+                  className="flex items-center gap-2 px-4 py-2 border border-[#dedede] hover:border-[#BE1E2D] text-[#111] rounded-full transition text-sm">
                   <Pencil size={14} /> Edit
                 </button>
                 <button onClick={() => setShowDeleteConfirm(true)}
@@ -340,7 +399,7 @@ export default function ItemPage() {
                   <X size={14} /> Cancel
                 </button>
                 <button onClick={handleSave} disabled={saving}
-                  className="flex items-center gap-2 px-4 py-2 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white rounded-full text-sm transition">
+                  className="flex items-center gap-2 px-4 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white rounded-full text-sm transition">
                   <Check size={14} /> {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </>
@@ -375,7 +434,7 @@ export default function ItemPage() {
                   <h2 className="text-2xl font-bold text-[#111] mb-2">Offer Sent!</h2>
                   <p className="text-[#979797] mb-6">The seller will review your offer and get back to you.</p>
                   <button onClick={() => { setShowOfferModal(false); setOfferSuccess(false); setOfferAmount(''); setOfferMessage(''); }}
-                    className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full transition">Done</button>
+                    className="bg-[#BE1E2D] hover:bg-[#9B1824] text-white px-8 py-3 rounded-full transition">Done</button>
                 </div>
               ) : (
                 <>
@@ -388,16 +447,16 @@ export default function ItemPage() {
                     <div>
                       <label className="block text-sm font-medium text-[#111] mb-1.5">Your Offer (Rands)</label>
                       <input type="number" value={offerAmount} onChange={(e) => setOfferAmount(e.target.value)}
-                        className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]" placeholder="e.g. 500" />
+                        className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D]" placeholder="e.g. 500" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-[#111] mb-1.5">Message (optional)</label>
                       <textarea value={offerMessage} onChange={(e) => setOfferMessage(e.target.value)}
-                        className="w-full h-24 bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] resize-none focus:outline-none focus:border-[#4757bf]"
+                        className="w-full h-24 bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] resize-none focus:outline-none focus:border-[#BE1E2D]"
                         placeholder="Why should the seller accept your offer?" />
                     </div>
                     <button onClick={handleSubmitOffer} disabled={submittingOffer || !offerAmount}
-                      className="w-full py-3 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-medium rounded-full transition">
+                      className="w-full py-3 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white font-medium rounded-full transition">
                       {submittingOffer ? 'Sending...' : 'Send Offer'}
                     </button>
                   </div>
@@ -417,7 +476,7 @@ export default function ItemPage() {
                   <h2 className="text-2xl font-bold text-[#111] mb-2">Bid Placed!</h2>
                   <p className="text-[#979797] mb-6">You&apos;re in the running. Check back to see if you win.</p>
                   <button onClick={() => { setShowBidModal(false); setBidSuccess(false); setBidAmount(''); }}
-                    className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full transition">Done</button>
+                    className="bg-[#BE1E2D] hover:bg-[#9B1824] text-white px-8 py-3 rounded-full transition">Done</button>
                 </div>
               ) : (
                 <>
@@ -432,7 +491,7 @@ export default function ItemPage() {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-[#979797]">Highest bid</span>
-                      <span className="text-[#4757bf] font-semibold">{highestBid ? `R${(highestBid / 100).toLocaleString()}` : 'No bids yet'}</span>
+                      <span className="text-[#BE1E2D] font-semibold">{highestBid ? `R${(highestBid / 100).toLocaleString()}` : 'No bids yet'}</span>
                     </div>
                     {timeLeft && (
                       <div className="flex justify-between text-sm">
@@ -444,11 +503,11 @@ export default function ItemPage() {
                   <div className="mb-4">
                     <label className="block text-sm font-medium text-[#111] mb-1.5">Your Bid (Rands)</label>
                     <input type="number" value={bidAmount} onChange={(e) => setBidAmount(e.target.value)}
-                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]"
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D]"
                       placeholder={`Min: R${highestBid ? (highestBid / 100) + 1 : (item.price_cents / 100) + 1}`} />
                   </div>
                   <button onClick={handleSubmitBid} disabled={submittingBid || !bidAmount || auctionEnded}
-                    className="w-full py-3 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-medium rounded-full transition">
+                    className="w-full py-3 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white font-medium rounded-full transition">
                     {auctionEnded ? 'Auction Ended' : submittingBid ? 'Placing Bid...' : 'Place Bid'}
                   </button>
                 </>
@@ -499,7 +558,7 @@ export default function ItemPage() {
                   <div key={i} className="relative group/thumb">
                     <button
                       onClick={() => setSelectedImage(i)}
-                      className={`w-16 h-16 rounded-xl overflow-hidden border-2 transition ${selectedImage === i ? 'border-[#4757bf]' : 'border-[#dedede] hover:border-[#4757bf]/50'}`}
+                      className={`w-16 h-16 rounded-xl overflow-hidden border-2 transition ${selectedImage === i ? 'border-[#BE1E2D]' : 'border-[#dedede] hover:border-[#BE1E2D]/50'}`}
                     >
                       <img src={src} alt="" className="w-full h-full object-contain bg-[#f4f4f4]" />
                     </button>
@@ -556,7 +615,7 @@ export default function ItemPage() {
                 <div>
                   <label className="block text-sm font-medium text-[#111] mb-1.5">Title</label>
                   <input type="text" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]" />
+                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D]" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -611,14 +670,14 @@ export default function ItemPage() {
                     <label className="flex items-center gap-3 cursor-pointer mb-3">
                       <input type="checkbox" checked={editForm.is_school_specific}
                         onChange={e => setEditForm({ ...editForm, is_school_specific: e.target.checked })}
-                        className="w-4 h-4 accent-[#4757bf]" />
+                        className="w-4 h-4 accent-[#BE1E2D]" />
                       <span className="text-sm text-[#111]">Link to a specific school</span>
                     </label>
                     {editForm.is_school_specific && (
                       <div className="bg-[#f4f4f4] border border-[#dedede] rounded-xl p-4 space-y-3">
                         {editSchoolId && !showSchoolPicker && (
                           <div className="flex items-center justify-between">
-                            <span className="text-[#4757bf] text-sm">🏫 {editSchoolName || 'School linked'}</span>
+                            <span className="text-[#BE1E2D] text-sm">🏫 {editSchoolName || 'School linked'}</span>
                             <button onClick={() => setShowSchoolPicker(true)} className="text-xs text-[#979797] hover:text-[#111]">Change</button>
                           </div>
                         )}
@@ -651,7 +710,7 @@ export default function ItemPage() {
                 <div>
                   <label className="block text-sm font-medium text-[#111] mb-1.5">Price (Rands)</label>
                   <input type="number" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
-                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf]" />
+                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D]" />
                 </div>
               </div>
             ) : (
@@ -668,23 +727,23 @@ export default function ItemPage() {
                 <div className="flex flex-wrap items-center gap-4 text-sm text-[#979797]">
                   {sellerProvince && (
                     <span className="flex items-center gap-1.5">
-                      <MapPin size={13} strokeWidth={2} className="text-[#4757bf]" />
+                      <MapPin size={13} strokeWidth={2} className="text-[#BE1E2D]" />
                       {sellerProvince}
                     </span>
                   )}
                   {viewSchoolName && (
                     <span className="flex items-center gap-1.5">
-                      <SchoolIcon size={13} strokeWidth={2} className="text-[#4757bf]" />
+                      <SchoolIcon size={13} strokeWidth={2} className="text-[#BE1E2D]" />
                       {viewSchoolName}
                     </span>
                   )}
                   <span className="flex items-center gap-1.5">
-                    <ShoppingBag size={13} strokeWidth={2} className="text-[#4757bf]" />
+                    <ShoppingBag size={13} strokeWidth={2} className="text-[#BE1E2D]" />
                     {sellerSoldCount === 0 ? 'New seller' : `${sellerSoldCount} sold`}
                   </span>
                 </div>
 
-                <div className="text-4xl font-bold text-[#4757bf] mb-6">R{(item.price_cents / 100).toLocaleString()}</div>
+                <div className="text-4xl font-bold text-[#BE1E2D] mb-6">R{(item.price_cents / 100).toLocaleString()}</div>
 
                 {/* Buyer actions — shown to all non-owners */}
                 {!isOwner && (
@@ -692,18 +751,12 @@ export default function ItemPage() {
                     {!isLoggedIn && (
                       <div className="bg-[#f4f4f4] border border-[#dedede] rounded-2xl p-5 text-center">
                         <p className="text-[#111] font-medium mb-2">Sign in to buy or make offers</p>
-                        <button onClick={() => router.push('/')} className="px-6 py-2 bg-[#4757bf] hover:bg-[#3a48a8] text-white rounded-full text-sm font-medium transition">Sign In</button>
+                        <button onClick={() => router.push('/')} className="px-6 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-sm font-medium transition">Sign In</button>
                       </div>
                     )}
-                    {isLoggedIn && !isAgeVerified && (
-                      <div className="bg-[#fffbeb] border border-[#fde68a] rounded-2xl p-5 text-center">
-                        <p className="text-yellow-700 font-medium">🔞 You must be 18+ to buy or make offers.</p>
-                        <p className="text-yellow-600 text-sm mt-1">You can browse but cannot purchase on this account.</p>
-                      </div>
-                    )}
-                    {isLoggedIn && isAgeVerified && (
+                    {isLoggedIn && (
                       <button onClick={handleBuyNow}
-                        className="w-full py-4 bg-[#4757bf] hover:bg-[#3a48a8] text-white font-semibold rounded-full transition">
+                        className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] text-white font-semibold rounded-full transition">
                         ⚡ Buy Now — R{(item.price_cents / 100).toLocaleString()}
                       </button>
                     )}
@@ -768,6 +821,131 @@ export default function ItemPage() {
           </div>
         </div>
 
+        {/* Shipping fields — only shown in edit mode */}
+        {isEditing && (
+          <div className="mt-8 border border-[#dedede] rounded-2xl p-6 space-y-6">
+            <h3 className="text-[#111] font-semibold text-base">Parcel &amp; Shipping</h3>
+
+            {/* Parcel dimensions */}
+            <div>
+              <p className="text-sm font-medium text-[#111] mb-3">Parcel dimensions</p>
+              <div className="grid grid-cols-2 gap-4">
+                {([
+                  { key: 'l', label: 'Length (cm)', placeholder: '30' },
+                  { key: 'w', label: 'Width (cm)',  placeholder: '20' },
+                  { key: 'h', label: 'Height (cm)', placeholder: '10' },
+                  { key: 'weight', label: 'Weight (kg)', placeholder: '0.5' },
+                ] as const).map(({ key, label, placeholder }) => (
+                  <div key={key}>
+                    <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">{label}</label>
+                    <input
+                      type="number" min="0" step={key === 'weight' ? '0.1' : '1'}
+                      value={editParcel[key]}
+                      onChange={e => setEditParcel(p => ({ ...p, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Locker size indicator */}
+              {editParcelDims && (
+                <div className={`mt-3 rounded-xl p-3 text-sm flex items-center gap-2 ${
+                  editFitsInLocker
+                    ? 'bg-[#f0fdf4] border border-[#bbf7d0] text-[#166534]'
+                    : 'bg-[#fffbeb] border border-[#fde68a] text-[#92400e]'
+                }`}>
+                  {editFitsInLocker
+                    ? <>📦 Fits a <strong>{LOCKER_SIZE_LABELS[editLockerSize!]} ({editLockerSize})</strong> PUDO locker</>
+                    : <>⚠ Too large for any PUDO locker — Door-to-Door only</>
+                  }
+                </div>
+              )}
+            </div>
+
+            {/* Shipping methods */}
+            <div>
+              <p className="text-sm font-medium text-[#111] mb-1">Shipping methods <span className="text-[#979797] font-normal">(select at least one)</span></p>
+              {!editParcelDims && (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  Fill in the parcel dimensions above first — PUDO Locker availability depends on the size.
+                </p>
+              )}
+              {editParcelDims && !editFitsInLocker && (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  This parcel is too large for any PUDO locker — only Door-to-Door is available. Adjust the dimensions if they look wrong.
+                </p>
+              )}
+              {editParcelDims && editFitsInLocker && !editShippingMethods.length && (
+                <p className="text-xs text-[#979797] mb-3">Select at least one method below.</p>
+              )}
+              <div className="space-y-3">
+                <button type="button" onClick={() => toggleEditShipping('PICKUP')}
+                  className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
+                    editShippingMethods.includes('PICKUP')
+                      ? 'border-[#BE1E2D] bg-[#fde8ea]'
+                      : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
+                  }`}>
+                  <Truck size={20} className={`mt-0.5 shrink-0 ${editShippingMethods.includes('PICKUP') ? 'text-[#BE1E2D]' : 'text-[#979797]'}`} />
+                  <div className="flex-1">
+                    <p className="text-[#111] font-medium text-sm">Door-to-Door pickup</p>
+                    <p className="text-[#979797] text-xs mt-0.5">A courier collects directly from your address</p>
+                  </div>
+                  {editShippingMethods.includes('PICKUP') && <CheckCircle2 size={18} className="text-[#BE1E2D] shrink-0 mt-0.5" />}
+                </button>
+
+                <button type="button"
+                  onClick={() => editFitsInLocker && toggleEditShipping('PUDO_DROPOFF')}
+                  disabled={!!editParcelDims && !editFitsInLocker}
+                  className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
+                    editShippingMethods.includes('PUDO_DROPOFF')
+                      ? 'border-[#BE1E2D] bg-[#fde8ea]'
+                      : editParcelDims && !editFitsInLocker
+                        ? 'border-[#dedede] bg-[#fafafa] opacity-50 cursor-not-allowed'
+                        : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
+                  }`}>
+                  <Box size={20} className={`mt-0.5 shrink-0 ${editShippingMethods.includes('PUDO_DROPOFF') ? 'text-[#BE1E2D]' : 'text-[#979797]'}`} />
+                  <div className="flex-1">
+                    <p className="text-[#111] font-medium text-sm">PUDO Locker drop-off</p>
+                    <p className="text-[#979797] text-xs mt-0.5">
+                      {editParcelDims && !editFitsInLocker
+                        ? 'Not available — parcel is too large for any locker'
+                        : editLockerSize
+                          ? `Drop at your nearest TCG locker · Needs ${LOCKER_SIZE_LABELS[editLockerSize]} (${editLockerSize}) slot`
+                          : 'Drop at your nearest The Courier Guy locker'
+                      }
+                    </p>
+                  </div>
+                  {editShippingMethods.includes('PUDO_DROPOFF') && <CheckCircle2 size={18} className="text-[#BE1E2D] shrink-0 mt-0.5" />}
+                </button>
+
+                {/* RULE: seller must choose their drop-off locker when PUDO_DROPOFF is selected */}
+                {editShippingMethods.includes('PUDO_DROPOFF') && editFitsInLocker && (
+                  <div className="pt-2 space-y-2">
+                    <p className="text-sm font-medium text-[#111]">
+                      Your drop-off locker <span className="text-red-500">*</span>
+                    </p>
+                    <p className="text-xs text-[#979797]">Buyers will see this as the collection point for their orders.</p>
+                    <LockerMapPicker
+                      suburb={editSellerSuburb}
+                      city={editSellerCity}
+                      selectedId={editPudoLockerId}
+                      selectedName={editPudoLockerName}
+                      selectedAddress={editPudoLockerAddress}
+                      onSelect={(locker: SelectedLocker | null) => {
+                        setEditPudoLockerId(locker?.id ?? '');
+                        setEditPudoLockerName(locker?.name ?? '');
+                        setEditPudoLockerAddress(locker?.address ?? '');
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Description fields — only shown in edit mode (view mode shows these inline in right panel) */}
         {isEditing && (
           <div className="mt-12 space-y-4">
@@ -776,7 +954,7 @@ export default function ItemPage() {
                 <label className="block text-xs uppercase tracking-widest text-[#979797] font-semibold mb-3">{DESCRIPTION_LABELS[i]}</label>
                 <textarea value={String(editForm[key as keyof typeof editForm])}
                   onChange={(e) => setEditForm({ ...editForm, [key]: e.target.value })}
-                  className="w-full h-24 bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] resize-none focus:outline-none focus:border-[#4757bf]" />
+                  className="w-full h-24 bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] resize-none focus:outline-none focus:border-[#BE1E2D]" />
               </div>
             ))}
           </div>

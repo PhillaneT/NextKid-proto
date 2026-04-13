@@ -5,6 +5,8 @@ import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { ArrowLeft, Lock, Package, Truck, MapPin, Loader2, Home } from 'lucide-react'
 import type { ShippingQuote } from '@nextkid/shared'
+import LockerMapPicker from '../../components/LockerMapPicker'
+import type { SelectedLocker } from '../../components/LockerMapPicker'
 
 type CheckoutListing = {
   id: string
@@ -45,6 +47,13 @@ export default function CheckoutPage() {
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  // Buyer locker — pre-populated from profile, changeable inline at checkout
+  const [buyerLockerId, setBuyerLockerId]       = useState('')
+  const [buyerLockerName, setBuyerLockerName]   = useState('')
+  const [buyerLockerAddress, setBuyerLockerAddress] = useState('')
+  const [buyerSuburb, setBuyerSuburb] = useState('')
+  const [buyerCity, setBuyerCity]     = useState('')
+
   useEffect(() => {
     async function load() {
       // 1. Get session
@@ -84,7 +93,7 @@ export default function CheckoutPage() {
       // message rather than a generic server error.
       const { data: buyerProfile } = await supabase
         .from('profiles')
-        .select('street_address')
+        .select('street_address, suburb_name, city_name, preferred_locker_id, preferred_locker_name, preferred_locker_address')
         .eq('id', session.user.id)
         .single()
 
@@ -92,6 +101,15 @@ export default function CheckoutPage() {
         setErrorCode('no_delivery_address')
         setStep('error')
         return
+      }
+
+      // Pre-populate buyer locker + location for the map
+      if (buyerProfile.suburb_name) setBuyerSuburb(buyerProfile.suburb_name)
+      if (buyerProfile.city_name) setBuyerCity(buyerProfile.city_name)
+      if (buyerProfile.preferred_locker_id) {
+        setBuyerLockerId(buyerProfile.preferred_locker_id)
+        setBuyerLockerName(buyerProfile.preferred_locker_name ?? '')
+        setBuyerLockerAddress(buyerProfile.preferred_locker_address ?? '')
       }
 
       // 4. Fetch shipping quotes
@@ -136,6 +154,9 @@ export default function CheckoutPage() {
   const shippingCents = selectedQuote ? Math.round(selectedQuote.rate * 100) : 0
   const totalCents = itemPriceCents + shippingCents
 
+  // RULE: D2L and L2L quotes require a buyer collection locker to be selected
+  const isPudoDelivery = selectedQuote?.method === 'D2L' || selectedQuote?.method === 'L2L'
+
   async function handleConfirmOrder() {
     if (!selectedQuote) return
     setStep('placing')
@@ -163,6 +184,9 @@ export default function CheckoutPage() {
           estimatedDeliveryFrom: new Date(selectedQuote.estimatedDeliveryFrom).toISOString(),
           estimatedDeliveryTo: new Date(selectedQuote.estimatedDeliveryTo).toISOString(),
         },
+        // RULE: snapshot buyer's chosen locker at order time — used for D2L and L2L shipment booking
+        buyerLockerId:   buyerLockerId   || null,
+        buyerLockerName: buyerLockerName || null,
       }),
     })
 
@@ -203,17 +227,17 @@ export default function CheckoutPage() {
               </p>
               <div className="bg-[#f4f4f4] rounded-xl p-3 mb-6 text-left text-xs text-[#555] space-y-1.5">
                 <div className="flex items-start gap-2">
-                  <Home size={13} strokeWidth={2} className="text-[#4757bf] mt-0.5 shrink-0" />
+                  <Home size={13} strokeWidth={2} className="text-[#BE1E2D] mt-0.5 shrink-0" />
                   <span><strong className="text-[#111]">Street address</strong> — for door-to-door delivery</span>
                 </div>
                 <div className="flex items-start gap-2">
-                  <MapPin size={13} strokeWidth={2} className="text-[#4757bf] mt-0.5 shrink-0" />
+                  <MapPin size={13} strokeWidth={2} className="text-[#BE1E2D] mt-0.5 shrink-0" />
                   <span><strong className="text-[#111]">PUDO locker</strong> — collect at a locker near you (often cheaper)</span>
                 </div>
               </div>
               <button
                 onClick={() => router.push('/profile')}
-                className="w-full py-3 bg-[#4757bf] hover:bg-[#3a48a8] text-white rounded-full font-semibold text-sm transition mb-3"
+                className="w-full py-3 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full font-semibold text-sm transition mb-3"
               >
                 Update my delivery info →
               </button>
@@ -238,7 +262,7 @@ export default function CheckoutPage() {
               </p>
               <button
                 onClick={() => router.back()}
-                className="px-8 py-3 bg-[#4757bf] hover:bg-[#3a48a8] text-white rounded-full font-semibold text-sm transition"
+                className="px-8 py-3 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full font-semibold text-sm transition"
               >
                 Go back
               </button>
@@ -286,7 +310,7 @@ export default function CheckoutPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
           <button
             onClick={() => router.back()}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#4757bf' }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#BE1E2D' }}
           >
             <ArrowLeft size={20} />
           </button>
@@ -312,7 +336,7 @@ export default function CheckoutPage() {
               {listing.condition && (
                 <p style={{ fontSize: '13px', color: '#888', margin: '0 0 4px' }}>Condition: {listing.condition.charAt(0) + listing.condition.slice(1).toLowerCase()}</p>
               )}
-              <p style={{ fontSize: '16px', fontWeight: 700, color: '#4757bf', margin: 0 }}>{formatRands(listing.price_cents)}</p>
+              <p style={{ fontSize: '16px', fontWeight: 700, color: '#BE1E2D', margin: 0 }}>{formatRands(listing.price_cents)}</p>
             </div>
           </div>
         )}
@@ -343,7 +367,7 @@ export default function CheckoutPage() {
                   style={{
                     width: '100%',
                     background: '#fff',
-                    border: `2px solid ${isSelected ? '#4757bf' : '#e0e0e0'}`,
+                    border: `2px solid ${isSelected ? '#BE1E2D' : '#e0e0e0'}`,
                     borderRadius: '16px',
                     padding: '16px 20px',
                     marginBottom: '10px',
@@ -354,9 +378,9 @@ export default function CheckoutPage() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      {isLocker ? <MapPin size={18} color={isSelected ? '#4757bf' : '#888'} /> : <Truck size={18} color={isSelected ? '#4757bf' : '#888'} />}
+                      {isLocker ? <MapPin size={18} color={isSelected ? '#BE1E2D' : '#888'} /> : <Truck size={18} color={isSelected ? '#BE1E2D' : '#888'} />}
                       <div>
-                        <p style={{ fontWeight: 600, fontSize: '14px', color: isSelected ? '#4757bf' : '#1a1a2e', margin: 0 }}>
+                        <p style={{ fontWeight: 600, fontSize: '14px', color: isSelected ? '#BE1E2D' : '#1a1a2e', margin: 0 }}>
                           {methodLabel} <span style={{ fontWeight: 400, color: '#888' }}>({quote.serviceLevelName})</span>
                         </p>
                         <p style={{ fontSize: '12px', color: '#888', margin: '2px 0 0' }}>
@@ -366,7 +390,7 @@ export default function CheckoutPage() {
                         </p>
                       </div>
                     </div>
-                    <p style={{ fontWeight: 700, fontSize: '15px', color: isSelected ? '#4757bf' : '#1a1a2e', margin: 0, flexShrink: 0, marginLeft: '12px' }}>
+                    <p style={{ fontWeight: 700, fontSize: '15px', color: isSelected ? '#BE1E2D' : '#1a1a2e', margin: 0, flexShrink: 0, marginLeft: '12px' }}>
                       {formatRandFloat(quote.rate)}
                     </p>
                   </div>
@@ -375,6 +399,30 @@ export default function CheckoutPage() {
             })
           )}
         </div>
+
+        {/* PUDO locker picker — appears when buyer selects a D2L or L2L quote */}
+        {isPudoDelivery && buyerSuburb && (
+          <div className="bg-white rounded-2xl p-5 mb-4 border border-[#e0e0e0]">
+            <p className="text-sm font-semibold text-[#1a1a2e] mb-1">
+              {buyerLockerId ? 'Your collection locker' : 'Choose a collection locker'}
+            </p>
+            <p className="text-xs text-[#888] mb-3">
+              Your order will be delivered to this PUDO locker for you to collect.
+            </p>
+            <LockerMapPicker
+              suburb={buyerSuburb}
+              city={buyerCity}
+              selectedId={buyerLockerId}
+              selectedName={buyerLockerName}
+              selectedAddress={buyerLockerAddress}
+              onSelect={(locker: SelectedLocker | null) => {
+                setBuyerLockerId(locker?.id ?? '')
+                setBuyerLockerName(locker?.name ?? '')
+                setBuyerLockerAddress(locker?.address ?? '')
+              }}
+            />
+          </div>
+        )}
 
         {/* Order summary */}
         <div style={{ background: '#fff', borderRadius: '16px', padding: '20px', marginBottom: '24px' }}>
@@ -391,7 +439,7 @@ export default function CheckoutPage() {
           </div>
           <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: '12px', display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: '16px', fontWeight: 700, color: '#1a1a2e' }}>Total</span>
-            <span style={{ fontSize: '16px', fontWeight: 700, color: '#4757bf' }}>
+            <span style={{ fontSize: '16px', fontWeight: 700, color: '#BE1E2D' }}>
               {selectedQuote ? formatRands(totalCents) : '—'}
             </span>
           </div>
@@ -403,7 +451,7 @@ export default function CheckoutPage() {
           disabled={!selectedQuote || step === 'placing'}
           style={{
             width: '100%',
-            background: selectedQuote ? '#4757bf' : '#c0c0c0',
+            background: selectedQuote ? '#BE1E2D' : '#c0c0c0',
             color: '#fff',
             border: 'none',
             borderRadius: '14px',

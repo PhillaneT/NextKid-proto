@@ -25,6 +25,8 @@ interface ProfileAddressRow {
   postal_code: string | null
   latitude: number | null
   longitude: number | null
+  preferred_locker_id?: string | null
+  preferred_locker_name?: string | null
 }
 
 // TCG /rates API response shape
@@ -87,14 +89,66 @@ async function fetchTCGRates(
   return []
 }
 
+// Stable demo quotes used both as a fallback inside handleRates and in the outer catch.
+// PROTOTYPE TRADE-OFF: remove before go-live.
+function buildDemoQuotes(buyerLockerId?: string | null, buyerLockerName?: string | null): ShippingQuote[] {
+  const now = new Date()
+  const d = (days: number) => new Date(now.getTime() + days * 86_400_000).toISOString()
+  const quotes: ShippingQuote[] = [
+    {
+      quoteId: crypto.randomUUID(),
+      method: 'D2D',
+      serviceLevelCode: 'ECO',
+      serviceLevelName: 'Economy (3–5 days)',
+      rate: 142.31,
+      rateExcludingVat: 123.75,
+      vatAmount: 18.56,
+      estimatedCollectionDate: new Date(d(1)),
+      estimatedDeliveryFrom:   new Date(d(3)),
+      estimatedDeliveryTo:     new Date(d(5)),
+    },
+    {
+      quoteId: crypto.randomUUID(),
+      method: 'D2D',
+      serviceLevelCode: 'OVN',
+      serviceLevelName: 'Overnight',
+      rate: 205.56,
+      rateExcludingVat: 178.75,
+      vatAmount: 26.81,
+      estimatedCollectionDate: new Date(d(1)),
+      estimatedDeliveryFrom:   new Date(d(2)),
+      estimatedDeliveryTo:     new Date(d(2)),
+    },
+  ]
+  // If buyer has a preferred locker, prepend a D2L option so the locker picker shows at checkout.
+  if (buyerLockerId) {
+    quotes.unshift({
+      quoteId: crypto.randomUUID(),
+      method: 'D2L',
+      serviceLevelCode: 'ECO',
+      serviceLevelName: 'Economy (3–5 days)',
+      rate: 68.75,
+      rateExcludingVat: 59.78,
+      vatAmount: 8.97,
+      estimatedCollectionDate: new Date(d(1)),
+      estimatedDeliveryFrom:   new Date(d(3)),
+      estimatedDeliveryTo:     new Date(d(5)),
+      deliveryLockerCode: buyerLockerId,
+      deliveryLockerName: buyerLockerName ?? undefined,
+    })
+  }
+  return quotes
+}
+
 export async function POST(req: NextRequest) {
   try {
     return await handleRates(req)
   } catch (err) {
-    // RULE: Never let an unhandled exception return an empty body — always return JSON.
-    // This wraps unexpected failures (TCG API timeout, malformed data, etc.)
-    console.error('Unhandled error in /api/shipping/rates:', err)
-    return NextResponse.json({ error: 'shipping_unavailable' }, { status: 503 })
+    // RULE: Never let an unhandled exception block checkout during the prototype.
+    // Log the error for diagnosis, then return demo quotes so the flow continues.
+    // PROTOTYPE TRADE-OFF: replace with a real error response before go-live.
+    console.error('Unhandled error in /api/shipping/rates — falling back to demo quotes:', err)
+    return NextResponse.json({ quotes: buildDemoQuotes(), itemPriceCents: 0, demo: true })
   }
 }
 
@@ -300,35 +354,11 @@ async function handleRates(req: NextRequest) {
   // 9. If TCG returned nothing, fall back to demo quotes so checkout is always demoable.
   // PROTOTYPE TRADE-OFF: remove demo fallback before go-live and surface the real error.
   if (quotes.length === 0) {
-    const now = new Date()
-    const d = (days: number) => new Date(now.getTime() + days * 86_400_000).toISOString()
-    const demoQuotes: ShippingQuote[] = [
-      {
-        quoteId: crypto.randomUUID(),
-        method: 'D2D',
-        serviceLevelCode: 'ECO',
-        serviceLevelName: 'Economy (3–5 days)',
-        rate: 142.31,
-        rateExcludingVat: 123.75,
-        vatAmount: 18.56,
-        estimatedCollectionDate: new Date(d(1)),
-        estimatedDeliveryFrom:   new Date(d(3)),
-        estimatedDeliveryTo:     new Date(d(5)),
-      },
-      {
-        quoteId: crypto.randomUUID(),
-        method: 'D2D',
-        serviceLevelCode: 'OVN',
-        serviceLevelName: 'Overnight',
-        rate: 205.56,
-        rateExcludingVat: 178.75,
-        vatAmount: 26.81,
-        estimatedCollectionDate: new Date(d(1)),
-        estimatedDeliveryFrom:   new Date(d(2)),
-        estimatedDeliveryTo:     new Date(d(2)),
-      },
-    ]
-    return NextResponse.json({ quotes: demoQuotes, itemPriceCents: listing.price_cents, demo: true })
+    return NextResponse.json({
+      quotes: buildDemoQuotes(buyerLockerId, buyerLockerName),
+      itemPriceCents: listing.price_cents,
+      demo: true,
+    })
   }
 
   // Sort cheapest first

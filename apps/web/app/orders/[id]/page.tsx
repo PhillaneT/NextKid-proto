@@ -20,6 +20,8 @@ type Order = {
   service_level_code: string | null;
   waybill_number: string | null;
   estimated_delivery: string | null;
+  delivery_locker_id: string | null;
+  delivery_locker_name: string | null;
   created_at: string;
   paid_at: string | null;
   shipped_at: string | null;
@@ -135,7 +137,7 @@ function DemoPaymentForm({
           </div>
           <div className="flex justify-between text-sm font-bold pt-2 border-t border-[#dedede]">
             <span className="text-[#111]">Total</span>
-            <span className="text-[#4757bf] text-base">{fmt(order.total_paid_cents)}</span>
+            <span className="text-[#BE1E2D] text-base">{fmt(order.total_paid_cents)}</span>
           </div>
         </div>
       </div>
@@ -143,7 +145,7 @@ function DemoPaymentForm({
       {/* Card form */}
       <div className="bg-white border border-[#dedede] rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2 mb-1">
-          <Lock size={14} strokeWidth={2} className="text-[#4757bf]" />
+          <Lock size={14} strokeWidth={2} className="text-[#BE1E2D]" />
           <p className="text-xs font-semibold text-[#979797] uppercase tracking-wide">Card details</p>
         </div>
 
@@ -181,7 +183,7 @@ function DemoPaymentForm({
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder="e.g. Phillane Visagie"
-            className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+            className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
           />
         </div>
 
@@ -190,7 +192,7 @@ function DemoPaymentForm({
         <button
           onClick={handlePay}
           disabled={paying}
-          className="w-full py-3.5 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white font-bold rounded-full transition flex items-center justify-center gap-2"
+          className="w-full py-3.5 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white font-bold rounded-full transition flex items-center justify-center gap-2"
         >
           {paying ? (
             <>
@@ -239,6 +241,7 @@ export default function OrderDetailPage() {
         item_price_cents, shipping_cost_cents, total_paid_cents,
         shipping_method, service_level_code,
         waybill_number, estimated_delivery,
+        delivery_locker_id, delivery_locker_name,
         created_at, paid_at, shipped_at, delivered_at, completed_at,
         listing_id
       `)
@@ -285,7 +288,7 @@ export default function OrderDetailPage() {
 
   if (loading) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
-      <div className="w-8 h-8 border-2 border-[#dedede] border-t-[#4757bf] rounded-full animate-spin" />
+      <div className="w-8 h-8 border-2 border-[#dedede] border-t-[#BE1E2D] rounded-full animate-spin" />
     </div>
   );
 
@@ -293,7 +296,7 @@ export default function OrderDetailPage() {
     <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-4 px-6">
       <Package size={48} strokeWidth={1.5} className="text-[#dedede]" />
       <p className="text-[#111] font-semibold">Order not found</p>
-      <button onClick={() => router.push('/orders')} className="px-6 py-2 bg-[#4757bf] text-white rounded-full text-sm font-semibold">
+      <button onClick={() => router.push('/orders')} className="px-6 py-2 bg-[#BE1E2D] text-white rounded-full text-sm font-semibold">
         My orders
       </button>
     </div>
@@ -316,7 +319,7 @@ export default function OrderDetailPage() {
         {/* Back */}
         <button
           onClick={() => router.push('/orders')}
-          className="flex items-center gap-1.5 text-[#4757bf] text-sm font-medium hover:underline"
+          className="flex items-center gap-1.5 text-[#BE1E2D] text-sm font-medium hover:underline"
         >
           <ArrowLeft size={16} strokeWidth={2} /> My orders
         </button>
@@ -336,7 +339,7 @@ export default function OrderDetailPage() {
             {isPending    && <Clock        size={44} strokeWidth={1.5} className="text-amber-500" />}
             {isDelivered  && <Package      size={44} strokeWidth={1.5} className="text-green-500" />}
             {!isCompleted && !isCancelled && !isDisputed && !isPending && !isDelivered && (
-              <Truck size={44} strokeWidth={1.5} className="text-[#4757bf]" />
+              <Truck size={44} strokeWidth={1.5} className="text-[#BE1E2D]" />
             )}
           </div>
           <h1 className={`text-lg font-bold ${isCompleted ? 'text-green-800' : isCancelled ? 'text-[#555]' : isDisputed ? 'text-red-800' : 'text-[#111]'}`}>
@@ -364,22 +367,22 @@ export default function OrderDetailPage() {
                   {/* Connector line + dot row */}
                   <div className="flex items-center w-full">
                     {/* Left connector */}
-                    <div className={`flex-1 h-0.5 ${i === 0 ? 'opacity-0' : i <= timelineIdx ? 'bg-[#4757bf]' : 'bg-[#dedede]'}`} />
+                    <div className={`flex-1 h-0.5 ${i === 0 ? 'opacity-0' : i <= timelineIdx ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`} />
                     {/* Dot */}
                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                      i < timelineIdx  ? 'bg-[#4757bf] border-[#4757bf]' :
-                      i === timelineIdx ? 'bg-white border-[#4757bf]' :
+                      i < timelineIdx  ? 'bg-[#BE1E2D] border-[#BE1E2D]' :
+                      i === timelineIdx ? 'bg-white border-[#BE1E2D]' :
                       'bg-white border-[#dedede]'
                     }`}>
                       {i < timelineIdx && <CheckCircle2 size={12} strokeWidth={3} className="text-white" />}
-                      {i === timelineIdx && <div className="w-2 h-2 rounded-full bg-[#4757bf]" />}
+                      {i === timelineIdx && <div className="w-2 h-2 rounded-full bg-[#BE1E2D]" />}
                     </div>
                     {/* Right connector */}
-                    <div className={`flex-1 h-0.5 ${i === TIMELINE_STEPS.length - 1 ? 'opacity-0' : i < timelineIdx ? 'bg-[#4757bf]' : 'bg-[#dedede]'}`} />
+                    <div className={`flex-1 h-0.5 ${i === TIMELINE_STEPS.length - 1 ? 'opacity-0' : i < timelineIdx ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`} />
                   </div>
                   {/* Label */}
                   <p className={`text-center mt-1.5 leading-tight ${
-                    i === timelineIdx ? 'text-[10px] font-bold text-[#4757bf]' : 'text-[10px] text-[#979797]'
+                    i === timelineIdx ? 'text-[10px] font-bold text-[#BE1E2D]' : 'text-[10px] text-[#979797]'
                   }`} style={{ maxWidth: '52px' }}>
                     {step.label}
                   </p>
@@ -403,7 +406,7 @@ export default function OrderDetailPage() {
               <span className="text-xs text-[#979797]">{order.shipping_method ? SHIPPING_LABELS[order.shipping_method] ?? order.shipping_method : ''}</span>
             </div>
           </div>
-          <p className="text-base font-bold text-[#4757bf] shrink-0">{fmt(order.total_paid_cents)}</p>
+          <p className="text-base font-bold text-[#BE1E2D] shrink-0">{fmt(order.total_paid_cents)}</p>
         </div>
 
         {/* ── State-specific content ─────────────────────────────────────────── */}
@@ -515,9 +518,16 @@ export default function OrderDetailPage() {
               <span className="text-sm text-[#111] font-medium">{value}</span>
             </div>
           ))}
+          {/* Show collection locker for PUDO delivery orders */}
+          {order.delivery_locker_name && (
+            <div className="flex justify-between items-start pt-1">
+              <span className="text-sm text-[#555]">Collect from</span>
+              <span className="text-sm text-[#111] font-medium text-right max-w-[60%]">{order.delivery_locker_name}</span>
+            </div>
+          )}
           <div className="flex justify-between pt-2 border-t border-[#dedede]">
             <span className="text-sm font-bold text-[#111]">Total paid</span>
-            <span className="text-sm font-bold text-[#4757bf]">{fmt(order.total_paid_cents)}</span>
+            <span className="text-sm font-bold text-[#BE1E2D]">{fmt(order.total_paid_cents)}</span>
           </div>
         </div>
 
@@ -525,13 +535,13 @@ export default function OrderDetailPage() {
         <div className="flex gap-3 pt-2">
           <button
             onClick={() => router.push('/orders')}
-            className="flex-1 py-3 border border-[#dedede] text-[#111] rounded-full text-sm font-semibold hover:border-[#4757bf] hover:text-[#4757bf] transition"
+            className="flex-1 py-3 border border-[#dedede] text-[#111] rounded-full text-sm font-semibold hover:border-[#BE1E2D] hover:text-[#BE1E2D] transition"
           >
             My orders
           </button>
           <button
             onClick={() => router.push('/browse')}
-            className="flex-1 py-3 bg-[#4757bf] hover:bg-[#3a48a8] text-white rounded-full text-sm font-semibold transition"
+            className="flex-1 py-3 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-sm font-semibold transition"
           >
             Browse more
           </button>

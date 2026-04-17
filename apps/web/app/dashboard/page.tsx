@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import {
   Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
-  Lock, CheckCircle2, AlertTriangle, BadgeCheck, MapPin,
+  Lock, BadgeCheck, MapPin,
 } from 'lucide-react';
 import { ALL_CATEGORIES } from '@nextkid/shared';
 import type { ListingCategory } from '@nextkid/shared';
@@ -23,9 +23,8 @@ const CATEGORY_ICON: Record<string, React.ReactNode> = {
 type Profile = {
   id: string;
   full_name: string;
-  role: 'buyer' | 'seller' | 'browse_only';
+  role: 'buyer' | 'seller';
   email: string;
-  is_age_verified: boolean;
 };
 
 export default function DashboardPage() {
@@ -55,43 +54,42 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-white">
 
       {/* Hero banner */}
-      <div className="bg-[#4757bf]">
+      <div className="bg-[#3A3A3A]">
         <div className="max-w-7xl mx-auto px-6 py-12 flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
+            <p className="text-[#BE1E2D] text-xs font-semibold tracking-widest uppercase mb-2">Welcome back</p>
             <h1 className="text-4xl font-bold text-white mb-2">
-              Welcome back, {firstName}!
+              {firstName}
             </h1>
-            <p className="text-white/80 text-lg">
-              South Africa&apos;s school marketplace — buy &amp; sell uniforms, books, sports kit and more.
+            <p className="text-white/60 text-base">
+              Buy &amp; sell uniforms, books, sports kit and more — right at your school.
             </p>
             <div className="flex gap-4 mt-6">
               <button
                 onClick={() => router.push('/browse')}
-                className="px-6 py-3 bg-white text-[#4757bf] font-semibold rounded-full hover:bg-white/90 transition text-sm"
+                className="px-6 py-3 bg-[#BE1E2D] text-white font-semibold rounded-full hover:bg-[#9B1824] transition text-sm"
               >
                 Browse listings
               </button>
-              {profile?.is_age_verified && (
-                <button
-                  onClick={() => router.push('/sell/new')}
-                  className="px-6 py-3 bg-white/20 text-white font-semibold rounded-full hover:bg-white/30 transition text-sm border border-white/40"
-                >
-                  + Sell an item
-                </button>
-              )}
+              <button
+                onClick={() => router.push('/sell/new')}
+                className="px-6 py-3 bg-white/10 text-white font-semibold rounded-full hover:bg-white/20 transition text-sm border border-white/20"
+              >
+                + Sell an item
+              </button>
             </div>
           </div>
-          <ShoppingBag size={96} strokeWidth={1.5} className="text-white/30 hidden md:block" />
+          <ShoppingBag size={96} strokeWidth={1.5} className="text-white/15 hidden md:block" />
         </div>
       </div>
 
       {/* Trust bar */}
-      <div className="border-b border-[#dedede] bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-wrap gap-8 text-sm text-[#979797]">
-          <span className="flex items-center gap-2"><MapPin size={14} strokeWidth={2} /> South Africa&apos;s school marketplace</span>
-          <span className="flex items-center gap-2"><BadgeCheck size={14} strokeWidth={2} /> Verified sellers</span>
-          <span className="flex items-center gap-2"><Lock size={14} strokeWidth={2} /> Secure payments via Peach Payments</span>
-          <span className="flex items-center gap-2"><Package size={14} strokeWidth={2} /> Real tracking on every order</span>
+      <div className="bg-[#6B6B6B]">
+        <div className="max-w-7xl mx-auto px-6 py-3.5 flex flex-wrap gap-8 text-sm text-white/80">
+          <span className="flex items-center gap-2"><MapPin size={13} strokeWidth={2} className="text-[#BE1E2D]" /> South Africa&apos;s school marketplace</span>
+          <span className="flex items-center gap-2"><BadgeCheck size={13} strokeWidth={2} className="text-[#BE1E2D]" /> Verified sellers</span>
+          <span className="flex items-center gap-2"><Lock size={13} strokeWidth={2} className="text-[#BE1E2D]" /> Secure payments via Peach Payments</span>
+          <span className="flex items-center gap-2"><Package size={13} strokeWidth={2} className="text-[#BE1E2D]" /> Real tracking on every order</span>
         </div>
       </div>
 
@@ -103,35 +101,15 @@ export default function DashboardPage() {
             <button
               key={cat}
               onClick={() => router.push(`/browse?category=${encodeURIComponent(cat)}`)}
-              className="flex flex-col items-center gap-2 p-4 bg-[#f4f4f4] rounded-2xl hover:bg-[#eef0fb] hover:text-[#4757bf] transition group text-center"
+              className="flex flex-col items-center gap-2 p-4 bg-[#f4f4f4] rounded-2xl hover:bg-[#fde8ea] hover:text-[#BE1E2D] transition group text-center"
             >
-              <span className="text-[#4757bf] group-hover:text-[#4757bf]">{CATEGORY_ICON[cat] ?? <Package size={26} strokeWidth={2} />}</span>
-              <span className="text-xs font-medium text-[#111] group-hover:text-[#4757bf] leading-tight">{cat}</span>
+              <span className="text-[#BE1E2D] group-hover:text-[#BE1E2D]">{CATEGORY_ICON[cat] ?? <Package size={26} strokeWidth={2} />}</span>
+              <span className="text-xs font-medium text-[#111] group-hover:text-[#BE1E2D] leading-tight">{cat}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Status banner */}
-      <div className="max-w-7xl mx-auto px-6 pb-12">
-        {profile?.is_age_verified ? (
-          <div className="bg-[#f0fdf4] border border-[#bbf7d0] rounded-2xl px-6 py-4 flex items-center gap-3">
-            <CheckCircle2 size={20} strokeWidth={2} className="text-green-500 shrink-0" />
-            <div>
-              <p className="font-semibold text-green-800 text-sm">Age Verified — 18+</p>
-              <p className="text-green-700 text-xs mt-0.5">You have full access to buy and sell on the platform.</p>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-[#fffbeb] border border-[#fde68a] rounded-2xl px-6 py-4 flex items-center gap-3">
-            <AlertTriangle size={20} strokeWidth={2} className="text-yellow-500 shrink-0" />
-            <div>
-              <p className="font-semibold text-yellow-800 text-sm">Browse Only — Under 18</p>
-              <p className="text-yellow-700 text-xs mt-0.5">You can browse but must be 18+ to buy or sell.</p>
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

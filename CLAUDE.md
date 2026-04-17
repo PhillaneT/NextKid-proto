@@ -1,15 +1,15 @@
-# CLAUDE.md — Marketplace App
+# CLAUDE.md — NextKid App
 
 ## Project Overview
-A peer-to-peer marketplace platform (web + mobile) where users can buy and sell physical items.
-Features include escrow-based payments via Peach Payments, in-app chat, dispute resolution, shipping tracking via The Courier Guy API, ratings/reviews, and a platform commission on completed sales.
+A peer-to-peer Marketplace platform (web + mobile) where users can buy and sell physical items.
+Features include escrow-based payments via Payfast/Peach Payments, dispute resolution, shipping tracking via The Courier Guy API, ratings/reviews, and a platform commission on completed sales.
 
 **Web:** Next.js (App Router)
 **Mobile:** Expo (React Native)
 **Backend:** Next.js API routes → will migrate to AWS (Lambda, API Gateway, DynamoDB, S3, SES, SNS)
-**Payments:** Peach Payments (escrow via delayed capture — SA-based alternative to Stripe)
+**Payments:** Payfast/Peach Payments (escrow via delayed capture — SA-based alternative to Stripe)
 **Shipping:** The Courier Guy API (via api-pudo.co.za)
-**Auth:** NextAuth.js or AWS Cognito (18+ verified users only)
+**Auth:** NextAuth.js or AWS Cognito 
 **Language:** TypeScript (strict mode — no `any`, ever)
 
 ---
@@ -22,6 +22,11 @@ These are conscious, documented shortcuts made during the prototype. Do not "fix
 - **Why:** Seed school data uses slug IDs (`school_011`, `school_012`, etc.) instead of UUIDs. The `school_ids` column was originally `uuid[]`, which caused a type mismatch. Migration `005_school_ids_text_array.sql` changed it to `text[]` to unblock the prototype.
 - **At AWS migration:** Real SA school data (from Dept. of Basic Education) will be imported with `gen_random_uuid()` IDs. At that point, change `school_ids` back to `uuid[]`, update `school_id` to `uuid references schools(id)`, and reseed. The rest of the schema (listings, profiles) already uses UUIDs correctly.
 - **Do not add FK constraint** to `school_ids text[]` — it cannot reference a table. Referential integrity on the primary school is enforced via `school_id text references schools(id)`.
+
+### TCG PUDO locker seed list
+- **Why:** The TCG API key is provisioned but the account has not been activated for production API access by TCG. All endpoints (`/lockers-data`, `/rates`, etc.) return 404.
+- **Workaround:** `apps/web/app/api/lockers/seed.ts` — 25 real Gauteng PUDO locker locations. The `/api/lockers/nearby` route falls back to this seed inside a `catch` block when the live API fails.
+- **At activation:** Delete `seed.ts` and the `catch` fallback in `apps/web/app/api/lockers/nearby/route.ts`. The live API takes over automatically.
 
 ---
 
@@ -51,10 +56,11 @@ These are conscious, documented shortcuts made during the prototype. Do not "fix
 ## Core Business Rules (Never Violate These)
 
 ### Users
-- All users must be 18+ with verified email AND phone before transacting
+- All users must have a verified email AND phone before transacting (no age restriction — students with their own bank accounts can buy and sell)
 - All users must complete location profile (Province → City → Suburb → School) before transacting
 - Sellers must connect and verify a Peach Payments payout account before listing
 - Buyers must add at least one valid payment method before purchasing
+- Fully anonymous, from Courier info to Delivery, both parties info only exist on their profiles, not on the items for sale or buying items.
 
 ### Payments & Escrow
 - All payments go through **Peach Payments** with **delayed capture (escrow)** — no direct transfers
@@ -62,6 +68,7 @@ These are conscious, documented shortcuts made during the prototype. Do not "fix
 - Platform commission is deducted automatically before releasing funds to seller
 - No commission is taken on refunded or cancelled orders
 - Peach Payments supports ZAR natively — no currency conversion needed
+- Courier cost is on the buyer and added to the checkout once waybill is printed and sent to Seller.
 
 ### Listings
 - Prohibited items are strictly banned (weapons, counterfeits, illegal goods)
@@ -87,14 +94,14 @@ These are conscious, documented shortcuts made during the prototype. Do not "fix
 - Filters: price range, condition, category, keywords, sort (newest, price asc/desc, distance)
 - Search must be fast — use debounce on keyword input (300ms)
 - Never show out-of-stock or delisted items in results
-- **School-based filtering:** Users can filter to see items from their school only, or nearby schools
+- **School-based filtering:** Users can filter to see items from their school only, or items for sale nationally
 
 ---
 
 ## User Profile & Location (Required for All Users)
 
 ### Overview
-This is a **student marketplace** focused on textbooks, uniforms, and school-related items. All users must complete their location and school profile before they can buy or sell.
+This is a **Marketplace** focused on textbooks, uniforms, and school-related items. All users must complete their location and school profile before they can buy or sell.
 
 ### Location Hierarchy
 ```
@@ -202,7 +209,7 @@ interface UserProfile {
     isCurrentStudent: boolean;  // Currently attending vs alumni
   };
   
-  // Marketplace settings
+  // NextKid settings
   sellerProfile?: SellerShippingProfile;  // Only if user wants to sell
   
   // Timestamps
@@ -213,6 +220,13 @@ interface UserProfile {
 
 // RULE: User cannot list or purchase until profileCompletedAt is set
 ```
+
+### Critical Column Name Distinction — `province` vs `province_code`
+
+**`profiles` table uses `province`** (full name, e.g. `'Gauteng'`) — NOT `province_code`.
+**`schools`, `cities`, `suburbs` tables use `province_code`** (e.g. `'GP'`).
+
+Querying `province_code` on `profiles` causes a **silent failure** — PostgREST returns an error, the query result is `null`, and no data loads. This burned us on the sell wizard school picker and the locker map. Always double-check the table before using either column name.
 
 ### Database Schema (Optimized for Fast Filtering)
 

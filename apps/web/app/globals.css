@@ -3,8 +3,10 @@
 :root {
   --background: #ffffff;
   --foreground: #111111;
-  --coral: #4757bf;
-  --coral-dark: #3a48a8;
+  --coral: #BE1E2D;
+  --coral-dark: #9B1824;
+  --charcoal: #3A3A3A;
+  --gray-mid: #6B6B6B;
   --surface: #f4f4f4;
   --border: #dedede;
   --text-secondary: #979797;
@@ -15,10 +17,13 @@
   --color-foreground: var(--foreground);
   --color-coral: var(--coral);
   --color-coral-dark: var(--coral-dark);
+  --color-charcoal: var(--charcoal);
+  --color-gray-mid: var(--gray-mid);
   --color-surface: var(--surface);
   --color-border: var(--border);
   --color-secondary: var(--text-secondary);
-  --font-sans: 'Roboto', system-ui, sans-serif;
+  --font-brand: var(--font-bebas), 'Impact', 'Arial Black', sans-serif;
+  --font-sans: var(--font-roboto), system-ui, sans-serif;
 }
 
 body {

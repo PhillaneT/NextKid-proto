@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import {
-  MapPin, School, CheckCircle2, AlertTriangle, Package,
+  MapPin, School, CheckCircle2, Package,
   Tag, Clock, ShoppingBag, Pencil, X, Check, Home, Search, LocateFixed,
 } from 'lucide-react';
 import Image from 'next/image';
@@ -17,7 +17,6 @@ type Profile = {
   full_name: string;
   email: string;
   role: string;
-  is_age_verified: boolean;
   province: string | null;
   city_id: string | null;
   city_name: string | null;
@@ -58,7 +57,7 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
   if (s === 'SOLD') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f0f4ff] border border-[#c7d2fe] text-[#4757bf] text-xs font-semibold">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#f0f4ff] border border-[#c7d2fe] text-[#BE1E2D] text-xs font-semibold">
       <CheckCircle2 size={11} strokeWidth={2.5} /> Sold
     </span>
   );
@@ -85,7 +84,7 @@ function ListingCard({ item, onClick }: { item: ListingItem; onClick: () => void
       <div className="p-3">
         <p className="text-xs text-[#979797] mb-0.5">{item.category}</p>
         <p className="text-sm font-semibold text-[#111] leading-snug line-clamp-2">{item.title}</p>
-        <p className="text-[#4757bf] font-bold text-base mt-1">R{(item.price_cents / 100).toLocaleString()}</p>
+        <p className="text-[#BE1E2D] font-bold text-base mt-1">R{(item.price_cents / 100).toLocaleString()}</p>
       </div>
     </button>
   );
@@ -360,23 +359,12 @@ export default function ProfilePage() {
         {/* ── Profile header ──────────────────────────────────────────────────── */}
         <div className="bg-[#f4f4f4] rounded-3xl p-6">
           <div className="flex items-start gap-5">
-            <div className="w-16 h-16 rounded-full bg-[#4757bf] flex items-center justify-center shrink-0">
+            <div className="w-16 h-16 rounded-full bg-[#BE1E2D] flex items-center justify-center shrink-0">
               <span className="text-white text-xl font-bold">{initials}</span>
             </div>
             <div className="flex-1 min-w-0">
               <h1 className="text-xl font-bold text-[#111]">{profile?.full_name}</h1>
               <p className="text-[#979797] text-sm mt-0.5">{profile?.email}</p>
-              <div className="flex flex-wrap gap-2 mt-3">
-                {profile?.is_age_verified ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#f0fdf4] border border-[#bbf7d0] text-green-700 text-xs font-semibold">
-                    <CheckCircle2 size={12} strokeWidth={2.5} /> Verified 18+
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#fffbeb] border border-[#fde68a] text-yellow-700 text-xs font-semibold">
-                    <AlertTriangle size={12} strokeWidth={2.5} /> Browse only
-                  </span>
-                )}
-              </div>
             </div>
             <button
               onClick={signOut}
@@ -397,7 +385,7 @@ export default function ProfilePage() {
             {!editingAddress && (
               <button
                 onClick={startEditAddress}
-                className="flex items-center gap-1.5 px-4 py-2 border border-[#dedede] hover:border-[#4757bf] text-[#111] hover:text-[#4757bf] rounded-full text-sm transition"
+                className="flex items-center gap-1.5 px-4 py-2 border border-[#dedede] hover:border-[#BE1E2D] text-[#111] hover:text-[#BE1E2D] rounded-full text-sm transition"
               >
                 <Pencil size={13} strokeWidth={2} /> Edit
               </button>
@@ -412,7 +400,7 @@ export default function ProfilePage() {
                 <input
                   value={editName}
                   onChange={e => setEditName(e.target.value)}
-                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
                   placeholder="Your full name"
                 />
               </div>
@@ -423,7 +411,7 @@ export default function ProfilePage() {
                 <select
                   value={editProvince}
                   onChange={e => setEditProvince(e.target.value)}
-                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
                 >
                   <option value="">Select province...</option>
                   {SA_PROVINCES.map(p => <option key={p}>{p}</option>)}
@@ -442,7 +430,7 @@ export default function ProfilePage() {
                       setEditCityName(opt?.name ?? '');
                     }}
                     disabled={loadingCities}
-                    className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition disabled:opacity-50"
+                    className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition disabled:opacity-50"
                   >
                     <option value="">{loadingCities ? 'Loading...' : 'Select city...'}</option>
                     {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -463,7 +451,7 @@ export default function ProfilePage() {
                       if (opt?.postal_code) setEditPostalCode(opt.postal_code);
                     }}
                     disabled={loadingSuburbs}
-                    className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition disabled:opacity-50"
+                    className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition disabled:opacity-50"
                   >
                     <option value="">{loadingSuburbs ? 'Loading...' : 'Select suburb...'}</option>
                     {suburbs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -479,7 +467,7 @@ export default function ProfilePage() {
                 <input
                   value={editStreet}
                   onChange={e => setEditStreet(e.target.value)}
-                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
                   placeholder="e.g. 12 Main Street, Apt 4"
                 />
               </div>
@@ -490,7 +478,7 @@ export default function ProfilePage() {
                 <input
                   value={editPostalCode}
                   onChange={e => setEditPostalCode(e.target.value)}
-                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
                   placeholder="e.g. 0157"
                   inputMode="numeric"
                 />
@@ -508,7 +496,7 @@ export default function ProfilePage() {
                 {/* Currently selected locker chip */}
                 {editLockerId && (
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#eef0fb] border border-[#c7d2fe] text-[#4757bf] text-xs font-semibold rounded-full">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#fde8ea] border border-[#c7d2fe] text-[#BE1E2D] text-xs font-semibold rounded-full">
                       <LocateFixed size={11} strokeWidth={2.5} />
                       {editLockerName}
                       <button type="button" onClick={() => { setEditLockerId(''); setEditLockerName(''); setEditLockerAddress(''); }} className="hover:text-red-500 transition ml-0.5">
@@ -525,7 +513,7 @@ export default function ProfilePage() {
                     <input
                       value={lockerQuery}
                       onChange={e => setLockerQuery(e.target.value)}
-                      className="w-full bg-white border border-[#dedede] rounded-xl pl-9 pr-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                      className="w-full bg-white border border-[#dedede] rounded-xl pl-9 pr-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
                       placeholder="Search by locker name or area, e.g. Rivonia, Fourways..."
                     />
                     {lockerQuery.length >= 2 && (
@@ -551,7 +539,7 @@ export default function ProfilePage() {
                               <span className="text-sm font-semibold text-[#111]">{l.name}</span>
                               <span className="block text-xs text-[#979797]">{l.address}</span>
                             </div>
-                            <LocateFixed size={13} strokeWidth={2} className="text-[#4757bf] shrink-0 ml-2" />
+                            <LocateFixed size={13} strokeWidth={2} className="text-[#BE1E2D] shrink-0 ml-2" />
                           </button>
                         ))}
                       </div>
@@ -566,7 +554,7 @@ export default function ProfilePage() {
                 <button
                   onClick={saveAddress}
                   disabled={savingAddress || !editName.trim()}
-                  className="flex items-center gap-2 px-5 py-2 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition"
+                  className="flex items-center gap-2 px-5 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition"
                 >
                   <Check size={14} strokeWidth={2.5} />
                   {savingAddress ? 'Saving...' : 'Save address'}
@@ -583,7 +571,7 @@ export default function ProfilePage() {
             <div className="space-y-2">
               {(profile?.suburb_name || profile?.city_name || profile?.province) ? (
                 <div className="flex items-center gap-2 text-sm text-[#555]">
-                  <MapPin size={14} strokeWidth={2} className="text-[#4757bf] shrink-0" />
+                  <MapPin size={14} strokeWidth={2} className="text-[#BE1E2D] shrink-0" />
                   {[profile.suburb_name, profile.city_name, profile.province].filter(Boolean).join(', ')}
                 </div>
               ) : (
@@ -591,7 +579,7 @@ export default function ProfilePage() {
               )}
               {profile?.street_address ? (
                 <div className="flex items-center gap-2 text-sm text-[#555]">
-                  <Home size={14} strokeWidth={2} className="text-[#4757bf] shrink-0" />
+                  <Home size={14} strokeWidth={2} className="text-[#BE1E2D] shrink-0" />
                   {profile.street_address}{profile.postal_code ? `, ${profile.postal_code}` : ''}
                 </div>
               ) : (
@@ -604,7 +592,7 @@ export default function ProfilePage() {
               {/* PUDO locker preference (view) */}
               {profile?.preferred_locker_id ? (
                 <div className="flex items-center gap-2 text-sm text-[#555]">
-                  <LocateFixed size={14} strokeWidth={2} className="text-[#4757bf] shrink-0" />
+                  <LocateFixed size={14} strokeWidth={2} className="text-[#BE1E2D] shrink-0" />
                   <span>
                     <span className="font-semibold">{profile.preferred_locker_name}</span>
                     {profile.preferred_locker_address && (
@@ -636,7 +624,7 @@ export default function ProfilePage() {
             {!editingSchools && (
               <button
                 onClick={startEditSchools}
-                className="flex items-center gap-1.5 px-4 py-2 border border-[#dedede] hover:border-[#4757bf] text-[#111] hover:text-[#4757bf] rounded-full text-sm transition"
+                className="flex items-center gap-1.5 px-4 py-2 border border-[#dedede] hover:border-[#BE1E2D] text-[#111] hover:text-[#BE1E2D] rounded-full text-sm transition"
               >
                 <Pencil size={13} strokeWidth={2} /> Edit
               </button>
@@ -649,7 +637,7 @@ export default function ProfilePage() {
               {editSchools.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {editSchools.map(s => (
-                    <span key={s.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#eef0fb] border border-[#c7d2fe] text-[#4757bf] text-xs font-semibold rounded-full">
+                    <span key={s.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#fde8ea] border border-[#c7d2fe] text-[#BE1E2D] text-xs font-semibold rounded-full">
                       <School size={11} strokeWidth={2.5} />
                       {s.name}
                       {s.province_code && <span className="font-normal text-[#7c8fd4]">· {s.province_code}</span>}
@@ -671,7 +659,7 @@ export default function ProfilePage() {
                   <input
                     value={schoolQuery}
                     onChange={e => setSchoolQuery(e.target.value)}
-                    className="w-full bg-white border border-[#dedede] rounded-xl pl-9 pr-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#4757bf] transition"
+                    className="w-full bg-white border border-[#dedede] rounded-xl pl-9 pr-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
                     placeholder="e.g. Grey College, Hoërskool Eldoraigne..."
                   />
                   {schoolQuery.length >= 2 && (
@@ -691,7 +679,7 @@ export default function ProfilePage() {
                             <span className="text-sm font-semibold text-[#111]">{r.name}</span>
                             <span className="block text-xs text-[#979797]">{r.city_name}{r.province_code ? ` · ${r.province_code}` : ''}</span>
                           </div>
-                          <Check size={13} strokeWidth={2.5} className="text-[#4757bf] shrink-0" />
+                          <Check size={13} strokeWidth={2.5} className="text-[#BE1E2D] shrink-0" />
                         </button>
                       ))}
                     </div>
@@ -709,7 +697,7 @@ export default function ProfilePage() {
                 <button
                   onClick={saveSchools}
                   disabled={savingSchools}
-                  className="flex items-center gap-2 px-5 py-2 bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition"
+                  className="flex items-center gap-2 px-5 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition"
                 >
                   <Check size={14} strokeWidth={2.5} />
                   {savingSchools ? 'Saving...' : 'Save schools'}
@@ -728,7 +716,7 @@ export default function ProfilePage() {
                 <div className="flex flex-wrap gap-2">
                   {schools.map(s => (
                     <span key={s.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#dedede] text-[#111] text-sm rounded-full">
-                      <School size={13} strokeWidth={2} className="text-[#4757bf]" />
+                      <School size={13} strokeWidth={2} className="text-[#BE1E2D]" />
                       {s.name}
                       {s.province_code && <span className="text-xs text-[#979797]">· {s.province_code}</span>}
                     </span>
@@ -744,15 +732,15 @@ export default function ProfilePage() {
         {/* ── Stats row ────────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-[#f4f4f4] rounded-2xl p-4 text-center">
-            <p className="text-2xl font-bold text-[#4757bf]">{activeListings.length}</p>
+            <p className="text-2xl font-bold text-[#BE1E2D]">{activeListings.length}</p>
             <p className="text-xs text-[#979797] mt-1 flex items-center justify-center gap-1"><Tag size={12} strokeWidth={2} /> Live listings</p>
           </div>
           <div className="bg-[#f4f4f4] rounded-2xl p-4 text-center">
-            <p className="text-2xl font-bold text-[#4757bf]">{soldListings.length}</p>
+            <p className="text-2xl font-bold text-[#BE1E2D]">{soldListings.length}</p>
             <p className="text-xs text-[#979797] mt-1 flex items-center justify-center gap-1"><ShoppingBag size={12} strokeWidth={2} /> Items sold</p>
           </div>
           <div className="bg-[#f4f4f4] rounded-2xl p-4 text-center">
-            <p className="text-2xl font-bold text-[#4757bf]">
+            <p className="text-2xl font-bold text-[#BE1E2D]">
               R{(soldListings.reduce((s, i) => s + i.price_cents, 0) / 100).toLocaleString()}
             </p>
             <p className="text-xs text-[#979797] mt-1 flex items-center justify-center gap-1"><Clock size={12} strokeWidth={2} /> Total earned</p>
@@ -769,7 +757,7 @@ export default function ProfilePage() {
                 className={`relative px-5 py-3 text-sm font-medium transition ${tab === t ? 'text-[#111]' : 'text-[#979797] hover:text-[#111]'}`}
               >
                 {t === 'active' ? `Live listings (${activeListings.length})` : `Sold (${soldListings.length})`}
-                {tab === t && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4757bf] rounded-full" />}
+                {tab === t && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#BE1E2D] rounded-full" />}
               </button>
             ))}
           </div>
@@ -786,7 +774,7 @@ export default function ProfilePage() {
               {tab === 'active' && (
                 <button
                   onClick={() => router.push('/sell/new')}
-                  className="mt-4 px-6 py-2 bg-[#4757bf] text-white rounded-full text-sm font-semibold hover:bg-[#3a48a8] transition"
+                  className="mt-4 px-6 py-2 bg-[#BE1E2D] text-white rounded-full text-sm font-semibold hover:bg-[#9B1824] transition"
                 >
                   + Create listing
                 </button>

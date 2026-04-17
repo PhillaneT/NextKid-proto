@@ -26,6 +26,7 @@ export interface School {
   name: string;
   province: SaProvince;
   city: string;
+  city_name?: string;  // denormalized — present on DB rows, matches city for display
   type: 'primary' | 'high' | 'combined';
 }
 

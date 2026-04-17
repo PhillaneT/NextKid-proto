@@ -13,6 +13,8 @@ import {
   canFitInLocker, getLockerSizeForParcel,
 } from '@nextkid/shared';
 import type { ListingCategory, School as SchoolType, ParcelDimensions, SellerShippingOption } from '@nextkid/shared';
+import LockerMapPicker from '../../components/LockerMapPicker';
+import type { SelectedLocker } from '../../components/LockerMapPicker';
 
 // Steps: 1=Category, 2=School(optional), 3=Details, 4=Parcel+Shipping, 5=Photos+Publish
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -27,7 +29,7 @@ const CATEGORY_ICON: Record<string, React.ReactNode> = {
   'Other':              <Package size={22} strokeWidth={2} />,
 };
 
-const inputCls = 'w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#4757bf] transition placeholder-[#979797]';
+const inputCls = 'w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D] transition placeholder-[#979797]';
 const labelCls = 'block text-sm text-[#979797] mb-2 font-medium';
 
 // RULE: Only show fields relevant to the chosen category — never ask pointless questions
@@ -87,6 +89,15 @@ export default function NewListingPage() {
   const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
   const [shippingMethods, setShippingMethods] = useState<SellerShippingOption[]>([]);
 
+  // Step 4 — PUDO locker selection (required when PUDO_DROPOFF is chosen and parcel fits)
+  const [pudoLockerId, setPudoLockerId]       = useState('');
+  const [pudoLockerName, setPudoLockerName]   = useState('');
+  const [pudoLockerAddress, setPudoLockerAddress] = useState('');
+
+  // Seller's suburb + city — used to pre-center the locker map
+  const [sellerSuburb, setSellerSuburb] = useState('');
+  const [sellerCity, setSellerCity]     = useState('');
+
   // Derived: parcel dimensions as numbers (for locker size calc)
   const parcelDims = useMemo<ParcelDimensions | null>(() => {
     const l = parseFloat(parcel.l), w = parseFloat(parcel.w);
@@ -100,21 +111,40 @@ export default function NewListingPage() {
 
   const parcelComplete = parcelDims !== null;
   // RULE: listing must not go ACTIVE without at least one shipping method
-  const shippingComplete = shippingMethods.length > 0;
+  // RULE: if PUDO_DROPOFF is selected and parcel fits a locker, a drop-off locker is required
+  const pudoDropoffNeedsLocker = shippingMethods.includes('PUDO_DROPOFF') && fitsInLocker;
+  const shippingComplete = shippingMethods.length > 0 && (!pudoDropoffNeedsLocker || !!pudoLockerId);
 
-  const toggleShipping = (method: SellerShippingOption) =>
+  const toggleShipping = (method: SellerShippingOption) => {
     setShippingMethods(prev =>
       prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
     );
+    // Clear saved locker when PUDO_DROPOFF is turned off
+    if (method === 'PUDO_DROPOFF' && shippingMethods.includes('PUDO_DROPOFF')) {
+      setPudoLockerId('');
+      setPudoLockerName('');
+      setPudoLockerAddress('');
+    }
+  };
 
-  // Load profile school on mount — pre-populates step 2 with the user's saved school
+  // Load profile schools on mount — pre-populates step 2 with all schools linked to the user's profile
+  // (school_ids is the text[] of all schools their children attend; school_id is their primary school)
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
-      const { data: prof } = await supabase.from('profiles').select('school_id, province_code').eq('id', user.id).single();
-      if (prof?.province_code) setProvince(prof.province_code);
-      if (prof?.school_id) {
-        const { data: saved } = await supabase.from('schools').select('*').eq('id', prof.school_id);
+      const { data: prof } = await supabase.from('profiles').select('school_id, school_ids, province, suburb_name, city_name').eq('id', user.id).single();
+      if (prof?.province) setProvince(prof.province);
+      if (prof?.suburb_name) setSellerSuburb(prof.suburb_name);
+      if (prof?.city_name) setSellerCity(prof.city_name);
+
+      // Collect all unique school IDs from both the primary school and the multi-school array
+      const allIds = Array.from(new Set([
+        ...(prof?.school_ids ?? []),
+        ...(prof?.school_id ? [prof.school_id] : []),
+      ])).filter(Boolean);
+
+      if (allIds.length > 0) {
+        const { data: saved } = await supabase.from('schools').select('*').in('id', allIds).order('name');
         setProfileSchools((saved as SchoolType[]) ?? []);
       }
     });
@@ -160,7 +190,7 @@ export default function NewListingPage() {
     if (!user) return;
 
     const { data: prof } = await supabase.from('profiles')
-      .select('province_code, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
+      .select('province, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
       .eq('id', user.id).single();
 
     // RULE: condition stored uppercase to match DB check constraint
@@ -178,7 +208,8 @@ export default function NewListingPage() {
       published_at:         new Date().toISOString(),
 
       // Seller location snapshot (denormalized — never join needed at query time)
-      seller_province_code: prof?.province_code ?? null,
+      // RULE: profiles table uses 'province', listings table uses 'seller_province_code'
+      seller_province_code: prof?.province ?? null,
       seller_city_id:       prof?.city_id ?? null,
       seller_city_name:     prof?.city_name ?? null,
       seller_suburb_id:     prof?.suburb_id ?? null,
@@ -200,6 +231,10 @@ export default function NewListingPage() {
 
       // RULE: at least one shipping method required before listing goes ACTIVE
       shipping_methods:     shippingMethods,
+
+      // RULE: if PUDO_DROPOFF selected, seller's chosen drop-off locker is required and stored here
+      pudo_locker_id:       pudoLockerId   || null,
+      pudo_locker_name:     pudoLockerName || null,
     });
 
     setLoading(false);
@@ -230,11 +265,11 @@ export default function NewListingPage() {
   if (showSuccess) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
       <div className="text-center">
-        <CheckCircle2 size={64} className="text-[#4757bf] mx-auto mb-6" strokeWidth={2} />
+        <CheckCircle2 size={64} className="text-[#BE1E2D] mx-auto mb-6" strokeWidth={2} />
         <h2 className="text-3xl font-bold text-[#111] mb-4">Listing Live!</h2>
         <p className="text-[#979797] mb-10">Your item is now active on NextKid.</p>
         <div className="flex gap-4 justify-center">
-          <button onClick={() => router.push('/browse')} className="bg-[#4757bf] hover:bg-[#3a48a8] text-white px-8 py-3 rounded-full font-medium transition">View in Browse</button>
+          <button onClick={() => router.push('/browse')} className="bg-[#BE1E2D] hover:bg-[#9B1824] text-white px-8 py-3 rounded-full font-medium transition">View in Browse</button>
           <button onClick={() => router.push('/dashboard')} className="border border-[#dedede] text-[#111] hover:bg-[#f4f4f4] px-8 py-3 rounded-full font-medium transition">Dashboard</button>
         </div>
       </div>
@@ -250,7 +285,7 @@ export default function NewListingPage() {
         {/* Progress bar */}
         <div className="flex gap-2 mb-8">
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <div key={i} className={`flex-1 h-1 rounded-full transition-colors ${i < displayStep ? 'bg-[#4757bf]' : 'bg-[#dedede]'}`} />
+            <div key={i} className={`flex-1 h-1 rounded-full transition-colors ${i < displayStep ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`} />
           ))}
         </div>
 
@@ -265,15 +300,15 @@ export default function NewListingPage() {
                 {ALL_CATEGORIES.map(cat => (
                   <button key={cat} type="button" onClick={() => setCategory(cat)}
                     className={`p-4 rounded-xl border-2 text-left transition flex items-start gap-3 ${
-                      category === cat ? 'border-[#4757bf] bg-[#eef0fb]' : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                      category === cat ? 'border-[#BE1E2D] bg-[#fde8ea]' : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
                     }`}>
-                    <span className={`mt-0.5 ${category === cat ? 'text-[#4757bf]' : 'text-[#979797]'}`}>
+                    <span className={`mt-0.5 ${category === cat ? 'text-[#BE1E2D]' : 'text-[#979797]'}`}>
                       {CATEGORY_ICON[cat] ?? <Package size={22} strokeWidth={2} />}
                     </span>
                     <div>
                       <span className="text-[#111] text-sm font-medium block">{cat}</span>
                       {SCHOOL_SPECIFIC_CATEGORIES.includes(cat as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) && (
-                        <span className="text-[#4757bf] text-xs block mt-0.5">School-specific</span>
+                        <span className="text-[#BE1E2D] text-xs block mt-0.5">School-specific</span>
                       )}
                     </div>
                   </button>
@@ -281,7 +316,7 @@ export default function NewListingPage() {
               </div>
             </div>
             <button disabled={!category} onClick={nextStep}
-              className="w-full py-3 rounded-full bg-[#4757bf] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
+              className="w-full py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
               Continue →
             </button>
           </>}
@@ -301,21 +336,21 @@ export default function NewListingPage() {
                   {profileSchools.map(school => (
                     <button key={school.id} type="button" onClick={() => setSelectedSchool(school)}
                       className={`w-full p-4 rounded-xl border-2 text-left flex items-center justify-between transition ${
-                        selectedSchool?.id === school.id ? 'border-[#4757bf] bg-[#eef0fb]' : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                        selectedSchool?.id === school.id ? 'border-[#BE1E2D] bg-[#fde8ea]' : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
                       }`}>
                       <div className="flex items-center gap-3">
-                        <School size={18} className={selectedSchool?.id === school.id ? 'text-[#4757bf]' : 'text-[#979797]'} />
+                        <School size={18} className={selectedSchool?.id === school.id ? 'text-[#BE1E2D]' : 'text-[#979797]'} />
                         <div>
                           <p className="text-[#111] text-sm font-medium">{school.name}</p>
                           <p className="text-[#979797] text-xs">{school.city_name}</p>
                         </div>
                       </div>
-                      {selectedSchool?.id === school.id && <CheckCircle2 size={18} className="text-[#4757bf] shrink-0" />}
+                      {selectedSchool?.id === school.id && <CheckCircle2 size={18} className="text-[#BE1E2D] shrink-0" />}
                     </button>
                   ))}
                   <p className="text-xs text-[#979797] pt-1">
                     Wrong school?{' '}
-                    <button type="button" onClick={() => setProfileSchools([])} className="text-[#4757bf] underline">Search all schools instead</button>
+                    <button type="button" onClick={() => setProfileSchools([])} className="text-[#BE1E2D] underline">Search all schools instead</button>
                   </p>
                 </div>
               ) : (
@@ -338,13 +373,13 @@ export default function NewListingPage() {
                           : filteredSchools.map(school => (
                             <div key={school.id} onClick={() => setSelectedSchool(school)}
                               className={`p-3 cursor-pointer flex justify-between items-center border-b border-[#dedede] ${
-                                selectedSchool?.id === school.id ? 'bg-[#eef0fb]' : 'hover:bg-[#f4f4f4]'
+                                selectedSchool?.id === school.id ? 'bg-[#fde8ea]' : 'hover:bg-[#f4f4f4]'
                               }`}>
                               <div>
                                 <p className="text-[#111] text-sm">{school.name}</p>
                                 <p className="text-[#979797] text-xs">{school.city_name} · {school.type}</p>
                               </div>
-                              {selectedSchool?.id === school.id && <CheckCircle2 size={16} className="text-[#4757bf]" />}
+                              {selectedSchool?.id === school.id && <CheckCircle2 size={16} className="text-[#BE1E2D]" />}
                             </div>
                           ))
                       }
@@ -352,8 +387,8 @@ export default function NewListingPage() {
                   </>}
 
                   {selectedSchool && (
-                    <div className="bg-[#eef0fb] border border-[#4757bf]/30 rounded-xl p-3 flex justify-between items-center">
-                      <span className="text-[#4757bf] text-sm flex items-center gap-2">
+                    <div className="bg-[#fde8ea] border border-[#BE1E2D]/30 rounded-xl p-3 flex justify-between items-center">
+                      <span className="text-[#BE1E2D] text-sm flex items-center gap-2">
                         <School size={14} /> {selectedSchool.name}
                       </span>
                       <button onClick={() => setSelectedSchool(null)} className="text-[#979797] hover:text-[#111]"><X size={14} /></button>
@@ -365,7 +400,7 @@ export default function NewListingPage() {
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={nextStep} disabled={!selectedSchool}
-                className="flex-grow py-3 rounded-full bg-[#4757bf] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
+                className="flex-grow py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 Continue →
               </button>
             </div>
@@ -471,7 +506,7 @@ export default function NewListingPage() {
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={nextStep} disabled={!form.title || !form.price}
-                className="flex-grow py-3 rounded-full bg-[#4757bf] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
+                className="flex-grow py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 Continue →
               </button>
             </div>
@@ -527,15 +562,15 @@ export default function NewListingPage() {
                 <button type="button" onClick={() => toggleShipping('PICKUP')}
                   className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
                     shippingMethods.includes('PICKUP')
-                      ? 'border-[#4757bf] bg-[#eef0fb]'
-                      : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                      ? 'border-[#BE1E2D] bg-[#fde8ea]'
+                      : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
                   }`}>
-                  <Truck size={22} className={`mt-0.5 shrink-0 ${shippingMethods.includes('PICKUP') ? 'text-[#4757bf]' : 'text-[#979797]'}`} />
+                  <Truck size={22} className={`mt-0.5 shrink-0 ${shippingMethods.includes('PICKUP') ? 'text-[#BE1E2D]' : 'text-[#979797]'}`} />
                   <div>
                     <p className="text-[#111] font-medium text-sm">Door-to-Door pickup</p>
                     <p className="text-[#979797] text-xs mt-0.5">A courier collects directly from your address</p>
                   </div>
-                  {shippingMethods.includes('PICKUP') && <CheckCircle2 size={18} className="text-[#4757bf] ml-auto shrink-0 mt-0.5" />}
+                  {shippingMethods.includes('PICKUP') && <CheckCircle2 size={18} className="text-[#BE1E2D] ml-auto shrink-0 mt-0.5" />}
                 </button>
 
                 {/* PUDO Locker — only shown if parcel fits */}
@@ -544,12 +579,12 @@ export default function NewListingPage() {
                   disabled={parcelComplete && !fitsInLocker}
                   className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
                     shippingMethods.includes('PUDO_DROPOFF')
-                      ? 'border-[#4757bf] bg-[#eef0fb]'
+                      ? 'border-[#BE1E2D] bg-[#fde8ea]'
                       : parcelComplete && !fitsInLocker
                         ? 'border-[#dedede] bg-[#fafafa] opacity-50 cursor-not-allowed'
-                        : 'border-[#dedede] bg-white hover:border-[#4757bf]/40'
+                        : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
                   }`}>
-                  <Box size={22} className={`mt-0.5 shrink-0 ${shippingMethods.includes('PUDO_DROPOFF') ? 'text-[#4757bf]' : 'text-[#979797]'}`} />
+                  <Box size={22} className={`mt-0.5 shrink-0 ${shippingMethods.includes('PUDO_DROPOFF') ? 'text-[#BE1E2D]' : 'text-[#979797]'}`} />
                   <div>
                     <p className="text-[#111] font-medium text-sm">PUDO Locker drop-off</p>
                     <p className="text-[#979797] text-xs mt-0.5">
@@ -561,15 +596,40 @@ export default function NewListingPage() {
                       }
                     </p>
                   </div>
-                  {shippingMethods.includes('PUDO_DROPOFF') && <CheckCircle2 size={18} className="text-[#4757bf] ml-auto shrink-0 mt-0.5" />}
+                  {shippingMethods.includes('PUDO_DROPOFF') && <CheckCircle2 size={18} className="text-[#BE1E2D] ml-auto shrink-0 mt-0.5" />}
                 </button>
+
+                {/* RULE: seller must choose their drop-off locker when PUDO_DROPOFF is selected */}
+                {shippingMethods.includes('PUDO_DROPOFF') && fitsInLocker && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-[#111] text-sm font-medium">
+                      Choose your drop-off locker{' '}
+                      <span className="text-red-500">*</span>
+                    </p>
+                    <p className="text-[#979797] text-xs">
+                      Buyers will see this locker as the collection point for their orders.
+                    </p>
+                    <LockerMapPicker
+                      suburb={sellerSuburb}
+                      city={sellerCity}
+                      selectedId={pudoLockerId}
+                      selectedName={pudoLockerName}
+                      selectedAddress={pudoLockerAddress}
+                      onSelect={(locker: SelectedLocker | null) => {
+                        setPudoLockerId(locker?.id ?? '');
+                        setPudoLockerName(locker?.name ?? '');
+                        setPudoLockerAddress(locker?.address ?? '');
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={nextStep} disabled={!parcelComplete || !shippingComplete}
-                className="flex-grow py-3 rounded-full bg-[#4757bf] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
+                className="flex-grow py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 Continue →
               </button>
             </div>
@@ -579,12 +639,12 @@ export default function NewListingPage() {
           {step === 5 && <>
             <h2 className="text-[#111] font-semibold text-lg mb-4">Add photos</h2>
 
-            <div className="border-2 border-dashed border-[#dedede] rounded-xl p-10 text-center hover:border-[#4757bf]/40 transition">
+            <div className="border-2 border-dashed border-[#dedede] rounded-xl p-10 text-center hover:border-[#BE1E2D]/40 transition">
               <input type="file" accept="image/*" multiple onChange={handleImageChange} className="hidden" id="upload" />
               <label htmlFor="upload" className="cursor-pointer">
                 <Package size={32} className="text-[#979797] mx-auto mb-3" strokeWidth={2} />
                 <p className="text-[#979797] mb-3 text-sm">Drag photos here or</p>
-                <span className="bg-[#4757bf] hover:bg-[#3a48a8] px-6 py-2 rounded-full text-white text-sm font-medium transition">
+                <span className="bg-[#BE1E2D] hover:bg-[#9B1824] px-6 py-2 rounded-full text-white text-sm font-medium transition">
                   {uploading ? 'Uploading...' : 'Select Photos'}
                 </span>
               </label>
@@ -607,7 +667,7 @@ export default function NewListingPage() {
               <p className="text-[#979797]">Category: <span className="text-[#111] font-medium">{category}</span></p>
               {selectedSchool && <p className="text-[#979797]">School: <span className="text-[#111] font-medium">{selectedSchool.name}</span></p>}
               <p className="text-[#979797]">Title: <span className="text-[#111] font-medium">{form.title}</span></p>
-              <p className="text-[#979797]">Price: <span className="text-[#4757bf] font-bold">R{form.price}</span></p>
+              <p className="text-[#979797]">Price: <span className="text-[#BE1E2D] font-bold">R{form.price}</span></p>
               {form.size && <p className="text-[#979797]">Size: <span className="text-[#111] font-medium">{form.size}</span></p>}
               <p className="text-[#979797]">Parcel: <span className="text-[#111] font-medium">{parcel.l}×{parcel.w}×{parcel.h} cm · {parcel.weight} kg</span></p>
               <p className="text-[#979797]">Shipping: <span className="text-[#111] font-medium">{shippingMethods.join(', ')}</span></p>
@@ -618,7 +678,7 @@ export default function NewListingPage() {
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={handleSubmit} disabled={loading || uploading}
-                className="flex-grow py-3 rounded-full bg-[#4757bf] hover:bg-[#3a48a8] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
+                className="flex-grow py-3 rounded-full bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 {loading ? 'Publishing...' : 'Publish Listing 🚀'}
               </button>
             </div>

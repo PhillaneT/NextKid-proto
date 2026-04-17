@@ -399,25 +399,36 @@ export function dimensionsToTCGParcel(
 }
 
 /**
- * Determine which locker size fits the parcel
+ * Determine which locker size fits the parcel, in any orientation.
+ *
+ * A seller can orient the parcel however it fits, so we sort both the parcel's
+ * 3 dims and the locker's 3 dims (opening-short, opening-long, depth) and compare
+ * smallest-to-smallest. This prevents a tall item being wrongly bumped to a larger
+ * size just because the user entered their dims in an order that doesn't match
+ * the locker's orientation.
  */
 export function getLockerSizeForParcel(
   dimensions: ParcelDimensions
 ): LockerSize | null {
   const sizes: LockerSize[] = ['V4-XS', 'V4-S', 'V4-M', 'V4-L', 'V4-XL'];
-  
+
+  // Sort parcel dims ascending so we can try the optimal orientation
+  const [d1, d2, d3] = [dimensions.widthCm, dimensions.heightCm, dimensions.lengthCm].sort((a, b) => a - b);
+
   for (const size of sizes) {
     const locker = LOCKER_SIZES[size];
+    // Sort locker opening dims: [opening-short, opening-long, depth]
+    const [o1, o2, o3] = [locker.width, locker.height, locker.length].sort((a, b) => a - b);
     if (
-      dimensions.widthCm <= locker.width &&
-      dimensions.heightCm <= locker.height &&
-      dimensions.lengthCm <= locker.length &&
+      d1 <= o1 &&
+      d2 <= o2 &&
+      d3 <= o3 &&
       dimensions.weightKg <= locker.maxWeight
     ) {
       return size;
     }
   }
-  
+
   return null; // Parcel too big for any locker
 }
 

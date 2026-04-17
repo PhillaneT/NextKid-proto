@@ -36,8 +36,9 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-6">
 
         {/* Logo */}
-        <a href="/dashboard" className="flex items-center gap-2 shrink-0">
-          <span className="text-2xl font-bold" style={{ color: '#4757bf' }}>NextKid</span>
+        <a href="/dashboard" className="flex items-center shrink-0 leading-none">
+          <span style={{ fontFamily: 'var(--font-bebas, Impact, "Arial Black", sans-serif)', fontSize: '1.75rem', letterSpacing: '0.04em', color: '#3A3A3A' }}>NEXT</span>
+          <span style={{ fontFamily: 'var(--font-bebas, Impact, "Arial Black", sans-serif)', fontSize: '1.75rem', letterSpacing: '0.04em', color: '#BE1E2D' }}>KID</span>
         </a>
 
         {/* Pill search bar */}
@@ -50,7 +51,7 @@ export default function Navbar() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search for school items..."
-              className="w-full bg-[#f4f4f4] rounded-full pl-10 pr-4 py-2.5 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#4757bf]/30 transition"
+              className="w-full bg-[#f4f4f4] rounded-full pl-10 pr-4 py-2.5 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#BE1E2D]/30 transition"
             />
           </div>
         </form>
@@ -73,7 +74,7 @@ export default function Navbar() {
         {!isLoggedIn ? (
           <button
             onClick={() => router.push('/')}
-            className="shrink-0 px-5 py-2 text-sm font-medium rounded-full bg-[#4757bf] text-white hover:bg-[#3a48a8] transition"
+            className="shrink-0 px-5 py-2 text-sm font-medium rounded-full bg-[#BE1E2D] text-white hover:bg-[#9B1824] transition"
           >
             Sign in
           </button>
@@ -94,11 +95,11 @@ function NavTab({ label, active, onClick }: { label: string; active: boolean; on
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium relative transition ${active ? 'text-[#4757bf]' : 'text-[#979797] hover:text-[#111]'}`}
+      className={`px-4 py-2 text-sm font-medium relative transition ${active ? 'text-[#BE1E2D]' : 'text-[#979797] hover:text-[#111]'}`}
     >
       {label}
       {active && (
-        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4757bf] rounded-full" />
+        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#BE1E2D] rounded-full" />
       )}
     </button>
   );

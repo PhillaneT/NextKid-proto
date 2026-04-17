@@ -105,7 +105,7 @@ function OrderCard({ order, onClick }: { order: OrderRow; onClick: () => void })
   return (
     <button
       onClick={onClick}
-      className="w-full text-left bg-white border border-[#dedede] rounded-2xl p-4 hover:border-[#4757bf] hover:shadow-sm transition group"
+      className="w-full text-left bg-white border border-[#dedede] rounded-2xl p-4 hover:border-[#BE1E2D] hover:shadow-sm transition group"
     >
       <div className="flex gap-4 items-start">
 
@@ -124,7 +124,7 @@ function OrderCard({ order, onClick }: { order: OrderRow; onClick: () => void })
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm font-semibold text-[#111] leading-snug line-clamp-2">{title}</p>
-            <ChevronRight size={16} strokeWidth={2} className="text-[#dedede] group-hover:text-[#4757bf] transition shrink-0 mt-0.5" />
+            <ChevronRight size={16} strokeWidth={2} className="text-[#dedede] group-hover:text-[#BE1E2D] transition shrink-0 mt-0.5" />
           </div>
 
           {/* Meta row */}
@@ -213,7 +213,7 @@ export default function OrdersPage() {
 
   if (loading) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
-      <div className="w-8 h-8 border-2 border-[#dedede] border-t-[#4757bf] rounded-full animate-spin" />
+      <div className="w-8 h-8 border-2 border-[#dedede] border-t-[#BE1E2D] rounded-full animate-spin" />
     </div>
   );
 
@@ -231,7 +231,7 @@ export default function OrdersPage() {
         {orders.length > 0 && (
           <div className="flex gap-3 mb-6">
             <div className="flex items-center gap-2 px-4 py-2 bg-[#f4f4f4] rounded-full">
-              <ShoppingBag size={14} strokeWidth={2} className="text-[#4757bf]" />
+              <ShoppingBag size={14} strokeWidth={2} className="text-[#BE1E2D]" />
               <span className="text-sm font-semibold text-[#111]">{orders.length} total</span>
             </div>
             {activeCount > 0 && (
@@ -263,7 +263,7 @@ export default function OrdersPage() {
                 className={`relative px-5 py-3 text-sm font-medium transition ${tab === key ? 'text-[#111]' : 'text-[#979797] hover:text-[#111]'}`}
               >
                 {label}
-                {tab === key && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4757bf] rounded-full" />}
+                {tab === key && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#BE1E2D] rounded-full" />}
               </button>
             ))}
           </div>
@@ -284,7 +284,7 @@ export default function OrdersPage() {
             {tab === 'all' && (
               <button
                 onClick={() => router.push('/browse')}
-                className="mt-5 px-6 py-2.5 bg-[#4757bf] text-white rounded-full text-sm font-semibold hover:bg-[#3a48a8] transition"
+                className="mt-5 px-6 py-2.5 bg-[#BE1E2D] text-white rounded-full text-sm font-semibold hover:bg-[#9B1824] transition"
               >
                 Browse items
               </button>

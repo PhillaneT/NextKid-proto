@@ -126,9 +126,9 @@ export default function BrowsePage() {
         </div>
 
         {tab === 'my_school' && !hasSchools && (
-          <div className="bg-[#fff8f7] border border-[#4757bf]/30 rounded-2xl p-5 mb-6 flex items-center justify-between">
+          <div className="bg-[#fff5f5] border border-[#BE1E2D]/30 rounded-2xl p-5 mb-6 flex items-center justify-between">
             <p className="text-[#979797] text-sm">You haven&apos;t added a school yet. Add one to see uniform and sports kit listings.</p>
-            <button onClick={() => router.push('/dashboard')} className="ml-4 px-4 py-2 bg-[#4757bf] text-white text-sm rounded-full shrink-0 hover:bg-[#3a48a8] transition">Add School</button>
+            <button onClick={() => router.push('/dashboard')} className="ml-4 px-4 py-2 bg-[#BE1E2D] text-white text-sm rounded-full shrink-0 hover:bg-[#9B1824] transition">Add School</button>
           </div>
         )}
 
@@ -141,7 +141,7 @@ export default function BrowsePage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search listings..."
-            className="w-full bg-[#f4f4f4] rounded-full pl-10 pr-4 py-3 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#4757bf]/30 transition"
+            className="w-full bg-[#f4f4f4] rounded-full pl-10 pr-4 py-3 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#BE1E2D]/30 transition"
           />
         </div>
 
@@ -153,8 +153,8 @@ export default function BrowsePage() {
               onClick={() => setCategory(cat)}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition ${
                 category === cat
-                  ? 'bg-[#4757bf] text-white'
-                  : 'bg-[#f4f4f4] text-[#111] hover:bg-[#eef0fb] hover:text-[#4757bf]'
+                  ? 'bg-[#BE1E2D] text-white'
+                  : 'bg-[#f4f4f4] text-[#111] hover:bg-[#fde8ea] hover:text-[#BE1E2D]'
               }`}
             >
               {cat !== 'All' && (
@@ -182,7 +182,7 @@ export default function BrowsePage() {
               <div
                 key={item.id}
                 onClick={() => router.push(`/item/${item.id}`)}
-                className="bg-white border border-[#dedede] rounded-2xl overflow-hidden hover:shadow-md hover:border-[#4757bf]/40 transition cursor-pointer group"
+                className="bg-white border border-[#dedede] rounded-2xl overflow-hidden hover:shadow-md hover:border-[#BE1E2D]/40 transition cursor-pointer group"
               >
                 {/* Image */}
                 <div className="aspect-square bg-[#f4f4f4] overflow-hidden">
@@ -207,7 +207,7 @@ export default function BrowsePage() {
                     {item.size && <span className="ml-auto bg-[#f4f4f4] px-1.5 py-0.5 rounded text-[10px]">Size {item.size}</span>}
                   </p>
                   <h3 className="text-sm font-medium text-[#111] line-clamp-2 leading-snug mb-2">{item.title}</h3>
-                  <p className="text-base font-bold text-[#4757bf]">R{(item.price_cents / 100).toLocaleString()}</p>
+                  <p className="text-base font-bold text-[#BE1E2D]">R{(item.price_cents / 100).toLocaleString()}</p>
                 </div>
               </div>
             ))}
@@ -224,7 +224,7 @@ function TabBtn({ icon, label, active, onClick }: { icon?: React.ReactNode; labe
       onClick={onClick}
       className={`flex items-center gap-1.5 px-5 py-3 text-sm font-medium border-b-2 transition -mb-px ${
         active
-          ? 'border-[#4757bf] text-[#4757bf]'
+          ? 'border-[#BE1E2D] text-[#BE1E2D]'
           : 'border-transparent text-[#979797] hover:text-[#111]'
       }`}
     >

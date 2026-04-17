@@ -11,7 +11,7 @@ interface SchoolOption { id: string; name: string; type: string; city_name: stri
 interface SuburbSearchResult { id: string; name: string; city_id: string; city_name: string; province_code: string; postal_code?: string }
 
 // ── Design tokens (match globals.css) ────────────────────────────────────────
-const BLUE    = '#4757bf'
+const BLUE    = '#BE1E2D'
 const BORDER  = '#dedede'
 const SURFACE = '#f4f4f4'
 const TEXT    = '#111111'
@@ -133,13 +133,6 @@ export default function OnboardingPage() {
     setSchoolSearch('')
   }, [suburbId])
 
-  const getAge = (d: string) => {
-    const birth = new Date(d), today = new Date()
-    let age = today.getFullYear() - birth.getFullYear()
-    if (today.getMonth() < birth.getMonth() ||
-      (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--
-    return age
-  }
 
   const handleSchoolSearch = useCallback((q: string) => setSchoolSearch(q), [])
 
@@ -191,7 +184,6 @@ export default function OnboardingPage() {
   const handleFinish = async () => {
     if (!locationComplete) return
     setSaveError('')
-    const isAdult = dob ? getAge(dob) >= 18 : false
     setSaving(true)
 
     const { error } = await supabase.from('profiles').upsert({
@@ -199,9 +191,7 @@ export default function OnboardingPage() {
       email: userEmail,
       full_name: fullName,
       date_of_birth: dob || null,
-      // RULE: users must be 18+ before transacting — under 18s get browse_only role
-      is_age_verified: isAdult,
-      role: isAdult ? 'buyer' : 'browse_only',
+      role: 'buyer',
       province,
       city_id: cityId,
       city_name: cityName,
@@ -245,21 +235,17 @@ export default function OnboardingPage() {
             </button>
           </>}
 
-          {/* ── Step 2: Age verification ──────────────────────── */}
+          {/* ── Step 2: Date of birth ────────────────────────── */}
           {step === 2 && <>
-            <h2 style={{ color: TEXT, fontSize: '22px', fontWeight: '700', marginBottom: '8px' }}>Verify your age</h2>
-            {/* RULE: users must be 18+ before transacting */}
+            <h2 style={{ color: TEXT, fontSize: '22px', fontWeight: '700', marginBottom: '8px' }}>Date of birth</h2>
             <p style={{ color: MUTED, fontSize: '14px', marginBottom: '28px' }}>
-              You must be 18+ to buy or sell. Under 18s can browse only.
+              Optional — helps us personalise your experience.
             </p>
             <label style={s.label}>Date of Birth</label>
             <input type="date" style={s.input} value={dob} onChange={e => setDob(e.target.value)} />
-            <div style={{ background: '#fff8f7', border: '1px solid #ffd5cf', borderRadius: '10px', padding: '12px', margin: '16px 0' }}>
-              <p style={{ color: MUTED, fontSize: '12px', margin: 0 }}>🔒 Used only for age verification and stored securely.</p>
-            </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
               <button style={{ ...btn(true), flex: 1, background: 'transparent', border: `1px solid ${BORDER}`, color: MUTED }} onClick={() => setStep(1)}>← Back</button>
-              <button style={{ ...btn(!!dob), flex: 2 }} disabled={!dob} onClick={() => setStep(3)}>Continue →</button>
+              <button style={{ ...btn(true), flex: 2 }} onClick={() => setStep(3)}>Continue →</button>
             </div>
           </>}
 

@@ -127,6 +127,8 @@ export default function ProfilePage() {
   const [lockerQuery, setLockerQuery]           = useState('');
   const [lockerResults, setLockerResults]       = useState<LockerResult[]>([]);
   const [searchingLockers, setSearchingLockers] = useState(false);
+  const [quickAddingLocker, setQuickAddingLocker] = useState(false);
+  const [savingQuickLocker, setSavingQuickLocker] = useState(false);
 
   // Suppress cascade resets when location is pre-filled from profile
   const skipProvinceRef = useRef('');
@@ -295,6 +297,35 @@ export default function ProfilePage() {
       setEditingAddress(false);
     }
     setSavingAddress(false);
+  }
+
+  // ── Quick locker add (from profile view, no full edit needed) ────────────────
+  function openQuickLockerPicker() {
+    setLockerQuery(profile?.suburb_name ?? profile?.city_name ?? '');
+    setLockerResults([]);
+    setQuickAddingLocker(true);
+  }
+
+  async function quickSaveLocker(locker: LockerResult) {
+    if (!profile) return;
+    setSavingQuickLocker(true);
+    const { error } = await supabase.from('profiles').update({
+      preferred_locker_id:      locker.id,
+      preferred_locker_name:    locker.name,
+      preferred_locker_address: locker.address,
+    }).eq('id', profile.id);
+    if (!error) {
+      setProfile(prev => prev ? {
+        ...prev,
+        preferred_locker_id:      locker.id,
+        preferred_locker_name:    locker.name,
+        preferred_locker_address: locker.address,
+      } : prev);
+    }
+    setQuickAddingLocker(false);
+    setLockerQuery('');
+    setLockerResults([]);
+    setSavingQuickLocker(false);
   }
 
   // ── Schools editing ───────────────────────────────────────────────────────────
@@ -600,11 +631,62 @@ export default function ProfilePage() {
                     )}
                   </span>
                 </div>
+              ) : quickAddingLocker ? (
+                <div className="mt-1 space-y-2">
+                  <p className="text-xs text-[#979797]">
+                    {profile?.suburb_name
+                      ? `Showing lockers near ${profile.suburb_name} — type to refine`
+                      : 'Search by locker name or area'}
+                  </p>
+                  <div className="relative">
+                    <Search size={15} strokeWidth={2} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#979797]" />
+                    <input
+                      autoFocus
+                      value={lockerQuery}
+                      onChange={e => setLockerQuery(e.target.value)}
+                      className="w-full bg-white border border-[#BE1E2D] rounded-xl pl-9 pr-4 py-2.5 text-[#111] text-sm focus:outline-none focus:ring-2 focus:ring-[#BE1E2D]/20 transition"
+                      placeholder="e.g. Rivonia, Fourways, Sandton..."
+                    />
+                    {lockerQuery.length >= 2 && (
+                      <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-[#dedede] rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                        {searchingLockers ? (
+                          <p className="text-[#979797] text-sm text-center py-3">Searching…</p>
+                        ) : lockerResults.length === 0 ? (
+                          <p className="text-[#979797] text-sm text-center py-3">No lockers found — try a different area</p>
+                        ) : lockerResults.map(l => (
+                          <button
+                            type="button"
+                            key={l.id}
+                            disabled={savingQuickLocker}
+                            onClick={() => quickSaveLocker(l)}
+                            className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-[#fde8ea] transition border-b border-[#f4f4f4] last:border-0 disabled:opacity-50"
+                          >
+                            <div>
+                              <span className="text-sm font-semibold text-[#111]">{l.name}</span>
+                              <span className="block text-xs text-[#979797]">{l.address}</span>
+                            </div>
+                            <LocateFixed size={13} strokeWidth={2} className="text-[#BE1E2D] shrink-0 ml-2" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setQuickAddingLocker(false); setLockerQuery(''); setLockerResults([]); }}
+                    className="text-xs text-[#979797] hover:text-[#111] transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#f4f4f4] border border-[#dedede] text-[#979797] text-xs">
-                    <LocateFixed size={11} strokeWidth={2} /> No preferred PUDO locker set
-                  </span>
+                  <button
+                    onClick={openQuickLockerPicker}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#f4f4f4] border border-dashed border-[#c0c0c0] text-[#979797] text-xs hover:border-[#BE1E2D] hover:text-[#BE1E2D] hover:bg-[#fde8ea] transition cursor-pointer"
+                  >
+                    <LocateFixed size={11} strokeWidth={2} /> No preferred PUDO locker set — tap to add
+                  </button>
                 </div>
               )}
             </div>

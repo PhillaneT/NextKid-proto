@@ -108,7 +108,7 @@ export default function DashboardPage() {
       const { data } = await supabase
         .from('listings')
         .select('id, title, category, price_cents, images, size, condition, created_at')
-        .eq('status', 'active')
+        .eq('status', 'ACTIVE')
         .order('created_at', { ascending: false })
         .limit(16);
       setRecentItems(data ?? []);

@@ -103,7 +103,7 @@ export default function LoginScreen() {
   );
 }
 
-const CORAL = '#4757bf';
+const CORAL = '#BE1E2D';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f4f4' },

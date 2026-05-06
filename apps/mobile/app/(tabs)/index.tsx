@@ -173,7 +173,7 @@ export default function BrowseScreen() {
 
       {/* Listings grid */}
       {loading ? (
-        <ActivityIndicator color="#4757bf" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#BE1E2D" style={{ marginTop: 40 }} />
       ) : items.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyEmoji}>🔍</Text>
@@ -220,7 +220,7 @@ export default function BrowseScreen() {
   );
 }
 
-const CORAL = '#4757bf';
+const CORAL = '#BE1E2D';
 const BORDER = '#dedede';
 const SURFACE = '#f4f4f4';
 

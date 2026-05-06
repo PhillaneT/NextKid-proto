@@ -12,7 +12,7 @@ import {
 } from 'lucide-react-native';
 import { SA_PROVINCES } from '@nextkid/shared';
 
-const BLUE = '#4757bf';
+const BLUE = '#BE1E2D';
 const BORDER = '#dedede';
 const SURFACE = '#f4f4f4';
 

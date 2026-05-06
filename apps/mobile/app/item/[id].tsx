@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/src/lib/supabase';
 import { Pencil, Check, X, MapPin, School as SchoolIcon } from 'lucide-react-native';
 
-const BLUE = '#4757bf';
+const BLUE = '#BE1E2D';
 const BORDER = '#dedede';
 const SURFACE = '#f4f4f4';
 

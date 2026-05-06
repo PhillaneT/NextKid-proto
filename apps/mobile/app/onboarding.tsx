@@ -419,7 +419,7 @@ export default function OnboardingScreen() {
   );
 }
 
-const BLUE   = '#4757bf';
+const BLUE   = '#BE1E2D';
 const BORDER = '#dedede';
 const SURF   = '#f4f4f4';
 

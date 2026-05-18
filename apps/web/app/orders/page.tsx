@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   Package, Clock, Truck, CheckCircle2, XCircle,
-  AlertTriangle, ShoppingBag, ChevronRight, MapPin,
+  AlertTriangle, ShoppingBag, ChevronRight,
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -14,6 +14,8 @@ import Image from 'next/image';
 type OrderRow = {
   id: string;
   status: string;
+  buyer_id: string;
+  seller_id: string;
   item_price_cents: number;
   shipping_cost_cents: number;
   total_paid_cents: number;
@@ -43,12 +45,25 @@ type StatusConfig = {
   group: TabFilter;
 };
 
-function getStatusConfig(status: string): StatusConfig {
+function getStatusConfig(status: string, isSeller = false): StatusConfig {
   switch (status) {
+    // Hub fulfilment flow
+    case 'AWAITING_DROPOFF':
+      return isSeller
+        ? { label: 'Drop off needed',    colour: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200', icon: <Package size={11} strokeWidth={2.5} />, group: 'active' }
+        : { label: 'Seller bringing item', colour: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-200',   icon: <Clock size={11} strokeWidth={2.5} />, group: 'active' };
+    case 'ITEM_AT_HUB':
+      return isSeller
+        ? { label: 'Buyer collecting',   colour: 'text-green-700', bg: 'bg-green-50',  border: 'border-green-200', icon: <CheckCircle2 size={11} strokeWidth={2.5} />, group: 'active' }
+        : { label: 'Ready to collect!',  colour: 'text-green-700', bg: 'bg-green-50',  border: 'border-green-300', icon: <CheckCircle2 size={11} strokeWidth={2.5} />, group: 'active' };
+    case 'UNCOLLECTED':
+      return { label: 'Uncollected', colour: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200', icon: <AlertTriangle size={11} strokeWidth={2.5} />, group: 'active' };
+    // Payment
     case 'PENDING_PAYMENT':
       return { label: 'Awaiting payment', colour: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', icon: <Clock size={11} strokeWidth={2.5} />, group: 'active' };
     case 'PAYMENT_HELD':
       return { label: 'Payment held', colour: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', icon: <CheckCircle2 size={11} strokeWidth={2.5} />, group: 'active' };
+    // Legacy courier flow
     case 'AWAITING_SHIPMENT_BOOKING':
       return { label: 'Waiting for seller to ship', colour: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', icon: <Clock size={11} strokeWidth={2.5} />, group: 'active' };
     case 'SHIPMENT_BOOKED':
@@ -61,6 +76,7 @@ function getStatusConfig(status: string): StatusConfig {
       return { label: 'Out for delivery', colour: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200', icon: <Truck size={11} strokeWidth={2.5} />, group: 'active' };
     case 'DELIVERED':
       return { label: 'Delivered — confirm receipt', colour: 'text-green-700', bg: 'bg-green-50', border: 'border-green-300', icon: <CheckCircle2 size={11} strokeWidth={2.5} />, group: 'active' };
+    // Terminal
     case 'COMPLETED':
       return { label: 'Completed', colour: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200', icon: <CheckCircle2 size={11} strokeWidth={2.5} />, group: 'completed' };
     case 'DISPUTED':
@@ -78,12 +94,6 @@ function getStatusConfig(status: string): StatusConfig {
   }
 }
 
-const SHIPPING_LABELS: Record<string, string> = {
-  D2D: 'Door-to-door',
-  D2L: 'PUDO locker',
-  L2D: 'Drop-off → door',
-  L2L: 'Locker to locker',
-};
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -95,8 +105,9 @@ function formatRands(cents: number) {
 
 // ── Order card ────────────────────────────────────────────────────────────────
 
-function OrderCard({ order, onClick }: { order: OrderRow; onClick: () => void }) {
-  const cfg = getStatusConfig(order.status);
+function OrderCard({ order, userId, onClick }: { order: OrderRow; userId: string; onClick: () => void }) {
+  const isSeller = order.seller_id === userId;
+  const cfg = getStatusConfig(order.status, isSeller);
   const cover = order.listings?.images?.[0] ?? null;
   const title = order.listings?.title ?? 'Item no longer available';
   const shortId = order.id.slice(0, 8).toUpperCase();
@@ -132,15 +143,8 @@ function OrderCard({ order, onClick }: { order: OrderRow; onClick: () => void })
             <span className="text-xs text-[#979797]">#{shortId}</span>
             <span className="text-xs text-[#979797]">·</span>
             <span className="text-xs text-[#979797]">{formatDate(order.created_at)}</span>
-            {order.shipping_method && (
-              <>
-                <span className="text-xs text-[#979797]">·</span>
-                <span className="inline-flex items-center gap-1 text-xs text-[#979797]">
-                  <MapPin size={10} strokeWidth={2} />
-                  {SHIPPING_LABELS[order.shipping_method] ?? order.shipping_method}
-                </span>
-              </>
-            )}
+            <span className="text-xs text-[#979797]">·</span>
+            <span className="text-xs font-medium text-[#979797]">{isSeller ? 'Selling' : 'Buying'}</span>
           </div>
 
           {/* Bottom row: price + status */}
@@ -152,8 +156,18 @@ function OrderCard({ order, onClick }: { order: OrderRow; onClick: () => void })
             </span>
           </div>
 
-          {/* Confirm receipt CTA — only shown for DELIVERED orders */}
-          {isDelivered && (
+          {/* Hub action banners */}
+          {order.status === 'AWAITING_DROPOFF' && isSeller && (
+            <div className="mt-3 px-3 py-2 bg-orange-50 border border-orange-200 rounded-xl">
+              <p className="text-xs text-orange-700 font-semibold">📦 Bring item to a Klerebank hub within 3 business days.</p>
+            </div>
+          )}
+          {order.status === 'ITEM_AT_HUB' && !isSeller && (
+            <div className="mt-3 px-3 py-2 bg-green-50 border border-green-200 rounded-xl">
+              <p className="text-xs text-green-700 font-semibold">🎉 Your item is at the hub — open order to get your collection QR.</p>
+            </div>
+          )}
+          {isDelivered && !isSeller && (
             <div className="mt-3 px-3 py-2 bg-green-50 border border-green-200 rounded-xl">
               <p className="text-xs text-green-700 font-semibold">
                 Item arrived? Tap to confirm receipt and release payment to seller.
@@ -177,25 +191,27 @@ function OrderCard({ order, onClick }: { order: OrderRow; onClick: () => void })
 
 export default function OrdersPage() {
   const router = useRouter();
-  const [orders, setOrders]   = useState<OrderRow[]>([]);
+  const [orders,  setOrders]  = useState<OrderRow[]>([]);
+  const [userId,  setUserId]  = useState('');
   const [loading, setLoading] = useState(true);
-  const [tab, setTab]         = useState<TabFilter>('all');
+  const [tab,     setTab]     = useState<TabFilter>('all');
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/'); return; }
+      setUserId(user.id);
 
       const { data } = await supabase
         .from('orders')
         .select(`
-          id, status,
+          id, status, buyer_id, seller_id,
           item_price_cents, shipping_cost_cents, total_paid_cents,
           shipping_method, service_level_code,
           created_at, estimated_delivery, waybill_number,
           listings ( title, images )
         `)
-        .eq('buyer_id', user.id)
+        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
       setOrders((data ?? []) as unknown as OrderRow[]);
@@ -204,12 +220,12 @@ export default function OrdersPage() {
     load();
   }, [router]);
 
-  const activeCount    = orders.filter(o => getStatusConfig(o.status).group === 'active').length;
-  const completedCount = orders.filter(o => getStatusConfig(o.status).group === 'completed').length;
+  const activeCount    = orders.filter(o => getStatusConfig(o.status, o.seller_id === userId).group === 'active').length;
+  const completedCount = orders.filter(o => getStatusConfig(o.status, o.seller_id === userId).group === 'completed').length;
 
   const displayed = tab === 'all'
     ? orders
-    : orders.filter(o => getStatusConfig(o.status).group === tab);
+    : orders.filter(o => getStatusConfig(o.status, o.seller_id === userId).group === tab);
 
   if (loading) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
@@ -223,8 +239,8 @@ export default function OrdersPage() {
 
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-[#111]">My Orders</h1>
-          <p className="text-sm text-[#979797] mt-1">Items you&apos;ve purchased on NextKid.</p>
+          <h1 className="text-2xl font-bold text-[#111]">Orders</h1>
+          <p className="text-sm text-[#979797] mt-1">Items you&apos;re buying and selling on NextKid.</p>
         </div>
 
         {/* Summary pills */}
@@ -296,6 +312,7 @@ export default function OrdersPage() {
               <OrderCard
                 key={order.id}
                 order={order}
+                userId={userId}
                 onClick={() => router.push(`/orders/${order.id}`)}
               />
             ))}

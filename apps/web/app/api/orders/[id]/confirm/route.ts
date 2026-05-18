@@ -4,7 +4,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { sendOrderNotification } from '@/lib/notifications'
 
 // Buyer confirms receipt of item → DELIVERED → COMPLETED
-// RULE: This triggers fund release to seller in production (Peach Payments capture).
+// RULE: This triggers fund release to seller in production (Stitch payment capture).
 // In demo mode it just advances the status.
 
 export async function POST(

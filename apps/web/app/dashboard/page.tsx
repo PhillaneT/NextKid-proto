@@ -161,7 +161,7 @@ export default function DashboardPage() {
         <div className="max-w-7xl mx-auto px-6 py-3.5 flex flex-wrap gap-8 text-sm text-white/80">
           <span className="flex items-center gap-2"><MapPin size={13} strokeWidth={2} className="text-[#BE1E2D]" /> South Africa&apos;s school marketplace</span>
           <span className="flex items-center gap-2"><BadgeCheck size={13} strokeWidth={2} className="text-[#BE1E2D]" /> Verified sellers</span>
-          <span className="flex items-center gap-2"><Lock size={13} strokeWidth={2} className="text-[#BE1E2D]" /> Secure payments via Peach Payments</span>
+          <span className="flex items-center gap-2"><Lock size={13} strokeWidth={2} className="text-[#BE1E2D]" /> Secure payments via Stitch</span>
           <span className="flex items-center gap-2"><Package size={13} strokeWidth={2} className="text-[#BE1E2D]" /> Real tracking on every order</span>
         </div>
       </div>

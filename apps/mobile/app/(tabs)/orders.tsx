@@ -7,8 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
 import {
-  Package, ShoppingBag, Truck, CheckCircle2, Clock,
-  AlertTriangle, XCircle, ChevronRight, MapPin,
+  Package, ShoppingBag, CheckCircle2, ChevronRight, QrCode,
 } from 'lucide-react-native';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -16,8 +15,9 @@ import {
 type OrderRow = {
   id: string;
   status: string;
+  buyer_id: string;
+  seller_id: string;
   item_price_cents: number;
-  shipping_cost_cents: number;
   total_paid_cents: number;
   shipping_method: string | null;
   created_at: string;
@@ -31,29 +31,42 @@ type TabFilter = 'all' | 'active' | 'completed';
 
 type StatusCfg = { label: string; color: string; bg: string; group: TabFilter };
 
-function getStatus(status: string): StatusCfg {
+function getStatus(status: string, isSeller = false): StatusCfg {
   switch (status) {
-    case 'PENDING_PAYMENT':           return { label: 'Awaiting payment',           color: '#92400e', bg: '#fffbeb', group: 'active' };
-    case 'PAYMENT_HELD':              return { label: 'Payment held',                color: '#1e40af', bg: '#eff6ff', group: 'active' };
-    case 'AWAITING_SHIPMENT_BOOKING': return { label: 'Waiting for seller to ship', color: '#1e40af', bg: '#eff6ff', group: 'active' };
-    case 'SHIPMENT_BOOKED':           return { label: 'Shipment booked',             color: '#3730a3', bg: '#eef2ff', group: 'active' };
-    case 'SHIPPED':                   return { label: 'Shipped',                     color: '#3730a3', bg: '#eef2ff', group: 'active' };
-    case 'IN_TRANSIT':                return { label: 'In transit',                  color: '#5b21b6', bg: '#f5f3ff', group: 'active' };
-    case 'OUT_FOR_DELIVERY':          return { label: 'Out for delivery',             color: '#5b21b6', bg: '#f5f3ff', group: 'active' };
-    case 'DELIVERED':                 return { label: 'Delivered — confirm receipt', color: '#166534', bg: '#f0fdf4', group: 'active' };
-    case 'COMPLETED':                 return { label: 'Completed',                   color: '#166534', bg: '#f0fdf4', group: 'completed' };
-    case 'DISPUTED':                  return { label: 'Disputed',                    color: '#991b1b', bg: '#fef2f2', group: 'active' };
-    case 'RESOLVED_REFUND':           return { label: 'Refunded',                    color: '#c2410c', bg: '#fff7ed', group: 'completed' };
-    case 'RESOLVED_RELEASED':         return { label: 'Resolved',                    color: '#166534', bg: '#f0fdf4', group: 'completed' };
-    case 'AUTO_CANCELLED':            return { label: 'Auto-cancelled',              color: '#979797', bg: '#f4f4f4', group: 'completed' };
-    case 'CANCELLED':                 return { label: 'Cancelled',                   color: '#979797', bg: '#f4f4f4', group: 'completed' };
-    default:                          return { label: status,                         color: '#979797', bg: '#f4f4f4', group: 'active' };
+    // Hub fulfilment flow
+    case 'AWAITING_DROPOFF':
+      return isSeller
+        ? { label: 'Drop off needed',      color: '#92400e', bg: '#fff7ed', group: 'active' }
+        : { label: 'Seller bringing item', color: '#1e40af', bg: '#eff6ff', group: 'active' };
+    case 'ITEM_AT_HUB':
+      return isSeller
+        ? { label: 'Buyer collecting',     color: '#166534', bg: '#f0fdf4', group: 'active' }
+        : { label: 'Ready to collect!',    color: '#166534', bg: '#dcfce7', group: 'active' };
+    case 'UNCOLLECTED':
+      return { label: 'Uncollected',       color: '#991b1b', bg: '#fef2f2', group: 'active' };
+
+    // Payment
+    case 'PENDING_PAYMENT':           return { label: 'Awaiting payment',     color: '#92400e', bg: '#fffbeb', group: 'active' };
+    case 'PAYMENT_HELD':              return { label: 'Payment held',          color: '#1e40af', bg: '#eff6ff', group: 'active' };
+
+    // Legacy courier flow
+    case 'AWAITING_SHIPMENT_BOOKING': return { label: 'Waiting for seller',   color: '#1e40af', bg: '#eff6ff', group: 'active' };
+    case 'SHIPMENT_BOOKED':           return { label: 'Shipment booked',       color: '#3730a3', bg: '#eef2ff', group: 'active' };
+    case 'SHIPPED':                   return { label: 'Shipped',               color: '#3730a3', bg: '#eef2ff', group: 'active' };
+    case 'IN_TRANSIT':                return { label: 'In transit',            color: '#5b21b6', bg: '#f5f3ff', group: 'active' };
+    case 'OUT_FOR_DELIVERY':          return { label: 'Out for delivery',      color: '#5b21b6', bg: '#f5f3ff', group: 'active' };
+    case 'DELIVERED':                 return { label: 'Confirm receipt',       color: '#166534', bg: '#f0fdf4', group: 'active' };
+
+    // Terminal
+    case 'COMPLETED':                 return { label: 'Completed',             color: '#166534', bg: '#f0fdf4', group: 'completed' };
+    case 'DISPUTED':                  return { label: 'Disputed',              color: '#991b1b', bg: '#fef2f2', group: 'active' };
+    case 'RESOLVED_REFUND':           return { label: 'Refunded',              color: '#c2410c', bg: '#fff7ed', group: 'completed' };
+    case 'RESOLVED_RELEASED':         return { label: 'Resolved',              color: '#166534', bg: '#f0fdf4', group: 'completed' };
+    case 'AUTO_CANCELLED':            return { label: 'Auto-cancelled',        color: '#979797', bg: '#f4f4f4', group: 'completed' };
+    case 'CANCELLED':                 return { label: 'Cancelled',             color: '#979797', bg: '#f4f4f4', group: 'completed' };
+    default:                          return { label: status,                  color: '#979797', bg: '#f4f4f4', group: 'active' };
   }
 }
-
-const SHIPPING_LABELS: Record<string, string> = {
-  D2D: 'Door-to-door', D2L: 'PUDO locker', L2D: 'Drop-off → door', L2L: 'Locker to locker',
-};
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -65,8 +78,17 @@ function fmtRands(cents: number) {
 
 // ── Order card ────────────────────────────────────────────────────────────────
 
-function OrderCard({ order, onPress }: { order: OrderRow; onPress: () => void }) {
-  const cfg      = getStatus(order.status);
+function OrderCard({
+  order,
+  userId,
+  onPress,
+}: {
+  order:   OrderRow;
+  userId:  string;
+  onPress: () => void;
+}) {
+  const isSeller = order.seller_id === userId;
+  const cfg      = getStatus(order.status, isSeller);
   const cover    = order.listings?.images?.[0] ?? null;
   const title    = order.listings?.title ?? 'Item no longer available';
   const shortId  = order.id.slice(0, 8).toUpperCase();
@@ -93,13 +115,8 @@ function OrderCard({ order, onPress }: { order: OrderRow; onPress: () => void })
             <Text style={styles.metaText}>#{shortId}</Text>
             <Text style={styles.metaDot}>·</Text>
             <Text style={styles.metaText}>{fmtDate(order.created_at)}</Text>
-            {order.shipping_method && (
-              <>
-                <Text style={styles.metaDot}>·</Text>
-                <MapPin size={10} strokeWidth={2} color="#979797" />
-                <Text style={styles.metaText}>{SHIPPING_LABELS[order.shipping_method] ?? order.shipping_method}</Text>
-              </>
-            )}
+            <Text style={styles.metaDot}>·</Text>
+            <Text style={styles.metaText}>{isSeller ? 'Selling' : 'Buying'}</Text>
           </View>
 
           <View style={styles.cardBottom}>
@@ -109,9 +126,23 @@ function OrderCard({ order, onPress }: { order: OrderRow; onPress: () => void })
             </View>
           </View>
 
-          {order.status === 'DELIVERED' && (
-            <View style={styles.deliveredBanner}>
-              <Text style={styles.deliveredText}>Item arrived? Tap to confirm receipt.</Text>
+          {/* Action banners for states requiring user action */}
+          {order.status === 'AWAITING_DROPOFF' && isSeller && (
+            <View style={styles.actionBanner}>
+              <Package size={11} strokeWidth={2} color="#92400e" />
+              <Text style={styles.actionText}>Bring item to a Klerebank hub within 3 days</Text>
+            </View>
+          )}
+          {order.status === 'ITEM_AT_HUB' && !isSeller && (
+            <View style={[styles.actionBanner, styles.actionBannerGreen]}>
+              <QrCode size={11} strokeWidth={2} color="#166534" />
+              <Text style={[styles.actionText, { color: '#166534' }]}>Your item is ready — tap to get your QR</Text>
+            </View>
+          )}
+          {order.status === 'DELIVERED' && !isSeller && (
+            <View style={[styles.actionBanner, styles.actionBannerGreen]}>
+              <CheckCircle2 size={11} strokeWidth={2.5} color="#166534" />
+              <Text style={[styles.actionText, { color: '#166534' }]}>Item arrived? Tap to confirm receipt</Text>
             </View>
           )}
         </View>
@@ -124,9 +155,10 @@ function OrderCard({ order, onPress }: { order: OrderRow; onPress: () => void })
 
 export default function OrdersScreen() {
   const router = useRouter();
-  const [orders, setOrders]   = useState<OrderRow[]>([]);
+  const [orders,  setOrders]  = useState<OrderRow[]>([]);
+  const [userId,  setUserId]  = useState('');
   const [loading, setLoading] = useState(true);
-  const [tab, setTab]         = useState<TabFilter>('all');
+  const [tab,     setTab]     = useState<TabFilter>('all');
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -134,11 +166,13 @@ export default function OrdersScreen() {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.replace('/' as never); return; }
+      setUserId(user.id);
 
+      // Fetch both buyer AND seller orders so sellers see their drop-off tasks
       const { data } = await supabase
         .from('orders')
-        .select('id, status, item_price_cents, shipping_cost_cents, total_paid_cents, shipping_method, created_at, waybill_number, listings(title, images)')
-        .eq('buyer_id', user.id)
+        .select('id, status, buyer_id, seller_id, item_price_cents, total_paid_cents, shipping_method, created_at, waybill_number, listings(title, images)')
+        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
       if (active) { setOrders((data ?? []) as unknown as OrderRow[]); setLoading(false); }
@@ -147,9 +181,11 @@ export default function OrdersScreen() {
     return () => { active = false; };
   }, []));
 
-  const activeCount    = orders.filter(o => getStatus(o.status).group === 'active').length;
-  const completedCount = orders.filter(o => getStatus(o.status).group === 'completed').length;
-  const displayed      = tab === 'all' ? orders : orders.filter(o => getStatus(o.status).group === tab);
+  const activeCount    = orders.filter(o => getStatus(o.status, o.seller_id === userId).group === 'active').length;
+  const completedCount = orders.filter(o => getStatus(o.status, o.seller_id === userId).group === 'completed').length;
+  const displayed      = tab === 'all'
+    ? orders
+    : orders.filter(o => getStatus(o.status, o.seller_id === userId).group === tab);
 
   if (loading) {
     return (
@@ -163,8 +199,8 @@ export default function OrdersScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.heading}>My Orders</Text>
-        <Text style={styles.subheading}>Items you've purchased on NextKid.</Text>
+        <Text style={styles.heading}>Orders</Text>
+        <Text style={styles.subheading}>Items you're buying and selling on NextKid.</Text>
       </View>
 
       {/* Tabs */}
@@ -189,7 +225,11 @@ export default function OrdersScreen() {
         contentContainerStyle={orders.length === 0 ? styles.emptyContainer : styles.list}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         renderItem={({ item }) => (
-          <OrderCard order={item} onPress={() => router.push(`/order/${item.id}` as never)} />
+          <OrderCard
+            order={item}
+            userId={userId}
+            onPress={() => router.push(`/order/${item.id}` as never)}
+          />
         )}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
@@ -198,7 +238,7 @@ export default function OrdersScreen() {
               {tab === 'active' ? 'No active orders' : tab === 'completed' ? 'No completed orders' : 'No orders yet'}
             </Text>
             <Text style={styles.emptyText}>
-              {tab === 'all' ? 'Items you buy will appear here with live tracking.' : 'Check back once orders progress.'}
+              {tab === 'all' ? 'Items you buy and sell will appear here.' : 'Check back once orders progress.'}
             </Text>
             {tab === 'all' && (
               <TouchableOpacity style={styles.browseBtn} onPress={() => router.replace('/(tabs)' as never)}>
@@ -223,41 +263,36 @@ const styles = StyleSheet.create({
   heading:    { color: '#111', fontSize: 22, fontWeight: '700' },
   subheading: { color: '#979797', fontSize: 13, marginTop: 2 },
 
-  tabs:         { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER, marginBottom: 4 },
-  tab:          { flex: 1, alignItems: 'center', paddingVertical: 12, position: 'relative' },
-  tabText:      { color: '#979797', fontSize: 12, fontWeight: '500' },
+  tabs:          { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER, marginBottom: 4 },
+  tab:           { flex: 1, alignItems: 'center', paddingVertical: 12, position: 'relative' },
+  tabText:       { color: '#979797', fontSize: 12, fontWeight: '500' },
   tabTextActive: { color: '#111', fontWeight: '700' },
-  tabUnderline: { position: 'absolute', bottom: 0, left: 8, right: 8, height: 2, backgroundColor: CRIMSON, borderRadius: 2 },
+  tabUnderline:  { position: 'absolute', bottom: 0, left: 8, right: 8, height: 2, backgroundColor: CRIMSON, borderRadius: 2 },
 
   list:           { paddingHorizontal: 14, paddingVertical: 12 },
   emptyContainer: { flex: 1, paddingHorizontal: 14 },
 
-  card: {
-    backgroundColor: '#fff', borderRadius: 18, borderWidth: 1, borderColor: BORDER,
-    overflow: 'hidden',
-  },
+  card: { backgroundColor: '#fff', borderRadius: 18, borderWidth: 1, borderColor: BORDER, overflow: 'hidden' },
   cardRow:  { flexDirection: 'row', gap: 12, padding: 14 },
-  thumb: {
-    width: 62, height: 62, borderRadius: 12, backgroundColor: SURFACE,
-    alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0,
-  },
+  thumb:    { width: 62, height: 62, borderRadius: 12, backgroundColor: SURFACE, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   cardBody: { flex: 1, minWidth: 0 },
   cardTop:  { flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginBottom: 4 },
   cardTitle: { flex: 1, color: '#111', fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  cardMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 3, marginBottom: 8 },
-  metaText: { color: '#979797', fontSize: 11 },
-  metaDot:  { color: '#979797', fontSize: 11 },
-  cardBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  cardPrice:  { color: '#111', fontSize: 14, fontWeight: '700' },
+  cardMeta:  { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 3, marginBottom: 8 },
+  metaText:  { color: '#979797', fontSize: 11 },
+  metaDot:   { color: '#979797', fontSize: 11 },
+  cardBottom:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  cardPrice:   { color: '#111', fontSize: 14, fontWeight: '700' },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, maxWidth: '65%' },
   statusText:  { fontSize: 10, fontWeight: '700' },
 
-  deliveredBanner: { marginTop: 8, backgroundColor: '#f0fdf4', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
-  deliveredText:   { color: '#166534', fontSize: 11, fontWeight: '600' },
+  actionBanner:      { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: '#fffbeb', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#fde68a' },
+  actionBannerGreen: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' },
+  actionText:        { color: '#92400e', fontSize: 11, fontWeight: '600', flex: 1 },
 
-  emptyWrap:  { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 60, gap: 8 },
-  emptyTitle: { color: '#111', fontSize: 16, fontWeight: '600', marginTop: 8 },
-  emptyText:  { color: '#979797', fontSize: 13, textAlign: 'center', maxWidth: 240 },
-  browseBtn:  { marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: CRIMSON, borderRadius: 30 },
+  emptyWrap:     { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 60, gap: 8 },
+  emptyTitle:    { color: '#111', fontSize: 16, fontWeight: '600', marginTop: 8 },
+  emptyText:     { color: '#979797', fontSize: 13, textAlign: 'center', maxWidth: 240 },
+  browseBtn:     { marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: CRIMSON, borderRadius: 30 },
   browseBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

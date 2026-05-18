@@ -8,7 +8,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
 import {
   Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
-  Lock, BadgeCheck, MapPin, Search, ShoppingCart, Check,
+  Lock, BadgeCheck, MapPin, Search, ShoppingCart, Check, School,
 } from 'lucide-react-native';
 import { useCart } from '@/src/lib/cart';
 import { ALL_CATEGORIES } from '@nextkid/shared';
@@ -31,6 +31,8 @@ function CategoryIcon({ name, color, size = 22 }: { name: string; color: string;
   }
 }
 
+type BrowseTab = 'my_school' | 'all';
+
 type Listing = {
   id: string;
   title: string;
@@ -38,6 +40,7 @@ type Listing = {
   price_cents: number;
   images: string[];
   seller_id: string;
+  seller_school_id: string | null;
   condition: string | null;
   created_at: string;
 };
@@ -53,38 +56,55 @@ function timeAgo(iso: string) {
 export default function HomeScreen() {
   const router = useRouter();
   const { add, has, count } = useCart();
-  const [firstName, setFirstName]       = useState('');
-  const [search, setSearch]             = useState('');
-  const [listings, setListings]         = useState<Listing[]>([]);
-  const [filtered, setFiltered]         = useState<Listing[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [selectedCat, setSelectedCat]   = useState<ListingCategory | ''>('');
+  const [firstName, setFirstName]         = useState('');
+  const [userSchoolIds, setUserSchoolIds] = useState<string[]>([]);
+  const [tab, setTab]                     = useState<BrowseTab>('all');
+  const [search, setSearch]               = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [listings, setListings]           = useState<Listing[]>([]);
+  const [filtered, setFiltered]           = useState<Listing[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [selectedCat, setSelectedCat]     = useState<ListingCategory | ''>('');
 
+  // Load user profile + school IDs on every focus
   useFocusEffect(useCallback(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { router.replace('/' as never); return; }
-      const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+      const { data: prof } = await supabase
+        .from('profiles').select('full_name, school_ids').eq('id', user.id).single();
       setFirstName(prof?.full_name?.split(' ')[0] ?? '');
+      setUserSchoolIds(prof?.school_ids ?? []);
     });
   }, []));
 
+  // Fetch all active listings once
   useEffect(() => {
     setLoading(true);
     supabase
       .from('listings')
-      .select('id, title, category, price_cents, images, seller_id, condition, created_at')
+      .select('id, title, category, price_cents, images, seller_id, seller_school_id, condition, created_at')
       .eq('status', 'ACTIVE')
       .order('created_at', { ascending: false })
-      .limit(20)
+      .limit(40)
       .then(({ data }) => { setListings(data ?? []); setLoading(false); });
   }, []);
 
+  // Debounce search input 300ms
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Client-side filter: tab + category + debounced search
   useEffect(() => {
     let result = listings;
+    if (tab === 'my_school' && userSchoolIds.length > 0) {
+      result = result.filter(l => l.seller_school_id && userSchoolIds.includes(l.seller_school_id));
+    }
     if (selectedCat) result = result.filter(l => l.category === selectedCat);
-    if (search.trim()) result = result.filter(l => l.title.toLowerCase().includes(search.toLowerCase()));
+    if (debouncedSearch.trim()) result = result.filter(l => l.title.toLowerCase().includes(debouncedSearch.toLowerCase()));
     setFiltered(result);
-  }, [listings, selectedCat, search]);
+  }, [listings, selectedCat, debouncedSearch, tab, userSchoolIds]);
 
   const CATS = ['', ...ALL_CATEGORIES] as const;
 
@@ -138,6 +158,34 @@ export default function HomeScreen() {
               ))}
             </View>
 
+            {/* My School / All Items tab switcher */}
+            <View style={styles.tabBar}>
+              <TouchableOpacity
+                style={[styles.tabBtn, tab === 'my_school' && styles.tabBtnActive]}
+                onPress={() => setTab('my_school')}
+              >
+                <School size={13} strokeWidth={2} color={tab === 'my_school' ? CRIMSON : '#979797'} />
+                <Text style={[styles.tabBtnText, tab === 'my_school' && styles.tabBtnTextActive]}>My School</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tabBtn, tab === 'all' && styles.tabBtnActive]}
+                onPress={() => setTab('all')}
+              >
+                <Package size={13} strokeWidth={2} color={tab === 'all' ? CRIMSON : '#979797'} />
+                <Text style={[styles.tabBtnText, tab === 'all' && styles.tabBtnTextActive]}>All Items</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* No school warning */}
+            {tab === 'my_school' && userSchoolIds.length === 0 && (
+              <View style={styles.noSchoolBanner}>
+                <Text style={styles.noSchoolText}>Add a school in your profile to see uniform and kit listings.</Text>
+                <TouchableOpacity onPress={() => router.push('/(tabs)/profile' as never)}>
+                  <Text style={styles.noSchoolLink}>Add school →</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Search bar */}
             <View style={styles.searchWrap}>
               <Search size={15} strokeWidth={2} color="#979797" />
@@ -168,8 +216,12 @@ export default function HomeScreen() {
             </ScrollView>
 
             <View style={styles.recentHeader}>
-              <Text style={styles.sectionTitle}>Recently listed</Text>
-              <Text style={styles.recentSub}>Fresh items just added</Text>
+              <Text style={styles.sectionTitle}>
+                {tab === 'my_school' ? 'At your school' : 'Recently listed'}
+              </Text>
+              <Text style={styles.recentSub}>
+                {tab === 'my_school' ? 'Items from your school community' : 'Fresh items just added'}
+              </Text>
             </View>
           </View>
         }
@@ -265,6 +317,17 @@ const styles = StyleSheet.create({
   catPillActive:{ backgroundColor: CRIMSON, borderColor: CRIMSON },
   catPillText:  { color: '#111', fontSize: 12, fontWeight: '500' },
   catPillTextActive: { color: '#fff' },
+
+  // My School / All Items tabs
+  tabBar:            { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER, marginTop: 4 },
+  tabBtn:            { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 12 },
+  tabBtnActive:      {},
+  tabBtnText:        { color: '#979797', fontSize: 13, fontWeight: '500' },
+  tabBtnTextActive:  { color: CRIMSON, fontWeight: '700' },
+  tabUnderline:      { position: 'absolute' as const, bottom: 0, left: 8, right: 8, height: 2, backgroundColor: CRIMSON, borderRadius: 2 },
+  noSchoolBanner:    { margin: 12, padding: 12, backgroundColor: '#fff5f5', borderRadius: 12, borderWidth: 1, borderColor: '#fecaca', gap: 4 },
+  noSchoolText:      { color: '#979797', fontSize: 12, lineHeight: 17 },
+  noSchoolLink:      { color: CRIMSON, fontSize: 12, fontWeight: '600' },
 
   recentHeader: { marginHorizontal: 14, marginTop: 16, marginBottom: 8 },
   recentSub:    { color: '#979797', fontSize: 12, marginTop: 2 },

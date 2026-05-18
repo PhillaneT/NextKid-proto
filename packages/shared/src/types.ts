@@ -35,7 +35,7 @@ export interface Listing {
   seller_id: string;
   title: string;
   description: string;
-  // RULE: Peach Payments uses ZAR natively — no currency conversion needed
+  // RULE: Stitch processes ZAR natively — no currency conversion needed
   // RULE: stored in cents (multiply by 100 on save, divide by 100 on display)
   price: number;
   category: ListingCategory;
@@ -79,7 +79,7 @@ export interface Order {
   buyerId: string;
   sellerId: string;
   status: OrderStatus;
-  // RULE: stored in cents — matches Peach Payments ZAR amount format
+  // RULE: stored in cents — Stitch ZAR amount format
   amountZarCents: number;
   createdAt: string;
   updatedAt: string;

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import {
   CheckCircle2, Clock, Truck, Package, ArrowLeft,
   Lock, AlertTriangle, XCircle, ShieldCheck, Banknote,
+  QrCode, Timer,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -13,6 +14,8 @@ import {
 type Order = {
   id: string;
   status: string;
+  buyer_id: string;
+  seller_id: string;
   item_price_cents: number;
   shipping_cost_cents: number;
   total_paid_cents: number;
@@ -54,16 +57,111 @@ const SHIPPING_LABELS: Record<string, string> = {
 // RULE: mirrors the state machine in the orders table check constraint exactly.
 
 const TIMELINE_STEPS = [
-  { statuses: ['PENDING_PAYMENT'],                           label: 'Order placed' },
-  { statuses: ['PAYMENT_HELD', 'AWAITING_SHIPMENT_BOOKING'], label: 'Payment secured' },
-  { statuses: ['SHIPMENT_BOOKED', 'SHIPPED'],                label: 'Shipped' },
-  { statuses: ['IN_TRANSIT', 'OUT_FOR_DELIVERY'],            label: 'In transit' },
-  { statuses: ['DELIVERED'],                                 label: 'Delivered' },
-  { statuses: ['COMPLETED'],                                 label: 'Complete' },
+  { statuses: ['PENDING_PAYMENT'],              label: 'Order placed' },
+  { statuses: ['AWAITING_DROPOFF'],             label: 'Payment held' },
+  { statuses: ['ITEM_AT_HUB'],                  label: 'At hub' },
+  { statuses: ['COMPLETED'],                    label: 'Complete' },
 ];
 
 function getTimelineIndex(status: string): number {
   return TIMELINE_STEPS.findIndex(s => s.statuses.includes(status));
+}
+
+// ── QR Panel ─────────────────────────────────────────────────────────────────
+
+function QrPanel({
+  orderId,
+  tokenType,
+  label,
+  instructions,
+}: {
+  orderId:      string
+  tokenType:    'dropoff' | 'collection'
+  label:        string
+  instructions: string
+}) {
+  const [qrDataUrl,     setQrDataUrl]     = useState<string | null>(null)
+  const [waybillNumber, setWaybillNumber] = useState<string | null>(null)
+  const [expiresAt,     setExpiresAt]     = useState<string | null>(null)
+  const [loading,       setLoading]       = useState(true)
+  const [error,         setError]         = useState('')
+
+  useEffect(() => {
+    async function load() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { setError('Session expired.'); setLoading(false); return }
+
+      const res = await fetch(`/api/orders/${orderId}/qr/${tokenType}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (!res.ok) {
+        setError(tokenType === 'collection' ? 'Collection QR not ready yet — drop-off must be confirmed first.' : 'QR not available.')
+        setLoading(false)
+        return
+      }
+      const data = await res.json()
+      setQrDataUrl(data.qrDataUrl)
+      setWaybillNumber(data.waybillNumber)
+      setExpiresAt(data.expiresAt)
+      setLoading(false)
+    }
+    load()
+  }, [orderId, tokenType])
+
+  const expiry = expiresAt
+    ? new Date(expiresAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : null
+
+  const accent = tokenType === 'dropoff' ? 'blue' : 'green'
+  const bg     = accent === 'blue' ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
+  const text   = accent === 'blue' ? 'text-blue-800' : 'text-green-800'
+  const sub    = accent === 'blue' ? 'text-blue-600' : 'text-green-700'
+
+  return (
+    <div className={`rounded-2xl border p-5 space-y-4 ${bg}`}>
+      <div className="flex items-start gap-3">
+        <QrCode size={20} strokeWidth={1.5} className={sub + ' shrink-0 mt-0.5'} />
+        <div>
+          <p className={`text-sm font-semibold ${text}`}>{label}</p>
+          <p className={`text-xs mt-0.5 ${sub}`}>{instructions}</p>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="flex justify-center py-6">
+          <div className="w-6 h-6 border-2 border-[#dedede] border-t-[#BE1E2D] rounded-full animate-spin" />
+        </div>
+      )}
+
+      {error && <p className="text-xs text-red-500">{error}</p>}
+
+      {!loading && !error && qrDataUrl && (
+        <div className="flex flex-col items-center gap-3">
+          <div className="bg-white rounded-xl p-3 border border-[#dedede]">
+            <img src={qrDataUrl} alt={`${label} QR Code`} className="w-48 h-48" />
+          </div>
+
+          {waybillNumber && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#979797]">Waybill</span>
+              <span className="text-sm font-mono font-bold text-[#111]">{waybillNumber}</span>
+            </div>
+          )}
+
+          {expiry && (
+            <div className="flex items-center gap-1.5">
+              <Timer size={12} strokeWidth={2} className="text-[#979797]" />
+              <span className="text-xs text-[#979797]">Valid until {expiry}</span>
+            </div>
+          )}
+
+          <p className="text-[10px] text-center text-[#979797] max-w-[220px]">
+            This QR is fully shareable — only a verified Klerebank Admin can action it.
+          </p>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Demo payment form ─────────────────────────────────────────────────────────
@@ -78,7 +176,7 @@ function DemoPaymentForm({
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
 
-  // Pre-filled Peach Payments test card details
+  // Pre-filled Stitch test card details
   const [cardNumber] = useState('4111 1111 1111 1111');
   const [expiry]     = useState('12/28');
   const [cvv]        = useState('123');
@@ -117,8 +215,8 @@ function DemoPaymentForm({
         <div>
           <p className="text-xs font-semibold text-amber-700">Demo mode — test payment</p>
           <p className="text-xs text-amber-600 mt-0.5">
-            Card details are pre-filled with Peach Payments test credentials.
-            No real money will be charged. Real escrow payment will replace this.
+            Card details are pre-filled with Stitch test credentials.
+            No real money will be charged. Real Stitch escrow payment will replace this.
           </p>
         </div>
       </div>
@@ -224,6 +322,7 @@ export default function OrderDetailPage() {
 
   const [order,   setOrder]   = useState<Order | null>(null);
   const [listing, setListing] = useState<Listing | null>(null);
+  const [userId,  setUserId]  = useState('');
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
@@ -233,11 +332,12 @@ export default function OrderDetailPage() {
   async function load() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.push('/'); return; }
+    setUserId(session.user.id);
 
     const { data: orderData, error } = await supabase
       .from('orders')
       .select(`
-        id, status,
+        id, status, buyer_id, seller_id,
         item_price_cents, shipping_cost_cents, total_paid_cents,
         shipping_method, service_level_code,
         waybill_number, estimated_delivery,
@@ -306,11 +406,14 @@ export default function OrderDetailPage() {
   const cover         = listing?.images?.[0] ?? null;
   const title         = listing?.title ?? 'Item';
   const timelineIdx   = getTimelineIndex(order.status);
+  const isSeller      = order.seller_id === userId;
   const isCancelled   = ['CANCELLED', 'AUTO_CANCELLED'].includes(order.status);
   const isDisputed    = order.status === 'DISPUTED';
   const isPending     = order.status === 'PENDING_PAYMENT';
   const isDelivered   = order.status === 'DELIVERED';
   const isCompleted   = order.status === 'COMPLETED';
+  const isAwaitingDropoff = order.status === 'AWAITING_DROPOFF';
+  const isAtHub           = order.status === 'ITEM_AT_HUB';
 
   return (
     <div className="min-h-screen bg-white">
@@ -343,11 +446,12 @@ export default function OrderDetailPage() {
             )}
           </div>
           <h1 className={`text-lg font-bold ${isCompleted ? 'text-green-800' : isCancelled ? 'text-[#555]' : isDisputed ? 'text-red-800' : 'text-[#111]'}`}>
-            {isCompleted    ? 'Order complete'
-            : isCancelled   ? 'Order cancelled'
-            : isDisputed    ? 'Dispute open'
-            : isPending     ? 'Awaiting payment'
-            : isDelivered   ? 'Your item has arrived!'
+            {isCompleted         ? 'Order complete'
+            : isCancelled        ? 'Order cancelled'
+            : isDisputed         ? 'Dispute open'
+            : isPending          ? 'Awaiting payment'
+            : isAwaitingDropoff  ? (isSeller ? 'Drop off your item at Klerebank' : 'Payment held — seller bringing item to hub')
+            : isAtHub            ? (isSeller ? 'Item received at Klerebank hub' : 'Your item is ready to collect!')
             : order.status === 'AWAITING_SHIPMENT_BOOKING' ? 'Payment secured — waiting for seller'
             : order.status === 'SHIPMENT_BOOKED'           ? 'Shipment booked'
             : order.status === 'SHIPPED'                   ? 'On its way to you'
@@ -414,6 +518,51 @@ export default function OrderDetailPage() {
         {/* PENDING_PAYMENT: demo payment form */}
         {isPending && (
           <DemoPaymentForm order={order} onPaid={() => load()} />
+        )}
+
+        {/* AWAITING_DROPOFF: seller sees DROP-OFF QR, buyer sees waiting message */}
+        {isAwaitingDropoff && isSeller && (
+          <QrPanel
+            orderId={order.id}
+            tokenType="dropoff"
+            label="Your Drop-Off QR"
+            instructions="Show or print this QR at any Klerebank location. The admin will scan it to confirm receipt of your item."
+          />
+        )}
+        {isAwaitingDropoff && !isSeller && (
+          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 flex gap-3">
+            <ShieldCheck size={20} strokeWidth={1.5} className="text-blue-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-blue-800">Payment held in escrow</p>
+              <p className="text-xs text-blue-600 mt-1">
+                Your {fmt(order.total_paid_cents)} is locked safely. The seller has been notified
+                and must drop the item off at a Klerebank hub within 3 business days.
+                You'll receive your collection QR once the item is confirmed at the hub.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ITEM_AT_HUB: buyer sees COLLECTION QR, seller sees confirmation */}
+        {isAtHub && !isSeller && (
+          <QrPanel
+            orderId={order.id}
+            tokenType="collection"
+            label="Your Collection QR"
+            instructions="Show this QR at any Klerebank location to collect your item. You can share it with someone collecting on your behalf."
+          />
+        )}
+        {isAtHub && isSeller && (
+          <div className="bg-green-50 border border-green-200 rounded-2xl p-5 flex gap-3">
+            <CheckCircle2 size={20} strokeWidth={1.5} className="text-green-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-green-800">Item received at Klerebank hub</p>
+              <p className="text-xs text-green-700 mt-1">
+                The buyer has been sent their collection QR. Once they collect, payment will be
+                released to you automatically.
+              </p>
+            </div>
+          </div>
         )}
 
         {/* AWAITING_SHIPMENT_BOOKING: payment confirmed, waiting for seller */}

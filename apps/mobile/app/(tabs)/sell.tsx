@@ -150,7 +150,7 @@ export default function SellScreen() {
       .eq('id', user.id).single();
 
     // RULE: condition stored uppercase to match DB check constraint
-    // RULE: price stored in cents — matches Peach Payments ZAR format
+    // RULE: price stored in cents — Stitch processes ZAR in cents natively
     const { error } = await supabase.from('listings').insert({
       seller_id:            user.id,
       title:                title.trim(),

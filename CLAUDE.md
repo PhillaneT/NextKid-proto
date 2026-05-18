@@ -2,12 +2,12 @@
 
 ## Project Overview
 A peer-to-peer Marketplace platform (web + mobile) where users can buy and sell physical items.
-Features include escrow-based payments via Payfast/Peach Payments, dispute resolution, shipping tracking via The Courier Guy API, ratings/reviews, and a platform commission on completed sales.
+Features include escrow-based payments via Stitch, dispute resolution, hub-based fulfilment via Klerebank, ratings/reviews, and a platform commission on completed sales.
 
 **Web:** Next.js (App Router)
 **Mobile:** Expo (React Native)
 **Backend:** Next.js API routes → will migrate to AWS (Lambda, API Gateway, DynamoDB, S3, SES, SNS)
-**Payments:** Payfast/Peach Payments (escrow via delayed capture — SA-based alternative to Stripe)
+**Payments:** Stitch (GraphQL API, SA-based, platform-as-middleman model — no native escrow needed)
 **Shipping:** The Courier Guy API (via api-pudo.co.za)
 **Auth:** NextAuth.js or AWS Cognito 
 **Language:** TypeScript (strict mode — no `any`, ever)
@@ -58,16 +58,16 @@ These are conscious, documented shortcuts made during the prototype. Do not "fix
 ### Users
 - All users must have a verified email AND phone before transacting (no age restriction — students with their own bank accounts can buy and sell)
 - All users must complete location profile (Province → City → Suburb → School) before transacting
-- Sellers must connect and verify a Peach Payments payout account before listing
+- Sellers must connect a verified payout bank account before listing
 - Buyers must add at least one valid payment method before purchasing
 - Fully anonymous, from Courier info to Delivery, both parties info only exist on their profiles, not on the items for sale or buying items.
 
 ### Payments & Escrow
-- All payments go through **Peach Payments** with **delayed capture (escrow)** — no direct transfers
+- All payments go through **Stitch** (GraphQL API, SA-based) — no direct buyer-to-seller transfers
 - Funds are only released to seller after buyer confirms receipt OR 7-day auto-confirm window passes
 - Platform commission is deducted automatically before releasing funds to seller
 - No commission is taken on refunded or cancelled orders
-- Peach Payments supports ZAR natively — no currency conversion needed
+- Stitch processes ZAR natively — no currency conversion needed
 - Courier cost is on the buyer and added to the checkout once waybill is printed and sent to Seller.
 
 ### Listings
@@ -650,7 +650,7 @@ interface Order {
   sellerPayoutCents: number;        // itemPrice - commission
   
   // Payment
-  peachPaymentId: string;
+  stitchPaymentId: string;
   paymentStatus: 'PENDING' | 'HELD' | 'CAPTURED' | 'REFUNDED';
   
   // Shipping
@@ -712,7 +712,7 @@ interface Order {
 
 ### Comments
 - Comment all complex business logic with a `// RULE:` prefix explaining WHY, not just what
-- Comment all Peach Payments-related code thoroughly — payment logic must be crystal clear
+- Comment all Stitch payment-related code thoroughly — payment logic must be crystal clear
 - Comment all TCG API integration code — shipping logic must be traceable
 - Document all escrow state transitions explicitly
 - Document all shipping state transitions explicitly
@@ -755,9 +755,9 @@ When implementing backend features, keep these services in mind so code is easy 
 
 ### Payments
 - Never bypass escrow — funds must never go directly from buyer to seller
-- Never expose Peach Payments access tokens in client-side code
+- Never expose Stitch API keys or tokens in client-side code
 - Never skip input validation on API routes
-- Never comment Peach Payments integration code lightly — payment logic must be crystal clear
+- Never comment Stitch payment integration code lightly — payment logic must be crystal clear
 
 ### Orders
 - Never delete or mutate order history — use append-only event logs
@@ -765,7 +765,7 @@ When implementing backend features, keep these services in mind so code is easy 
 
 ### Listings
 - Never show prohibited item categories in listing creation flows
-- Never allow a listing to go live without seller Peach Payments verification check
+- Never allow a listing to go live without seller bank account verification
 - Never allow a listing to go live without parcel dimensions specified
 - Never allow a listing to go live without at least one shipping method configured
 
@@ -781,11 +781,14 @@ When implementing backend features, keep these services in mind so code is easy 
 
 ## Environment Variables Pattern
 ```
-# Peach Payments
-PEACH_PAYMENTS_ENTITY_ID=
-PEACH_PAYMENTS_ACCESS_TOKEN=
-PEACH_PAYMENTS_WEBHOOK_SECRET=
+# Stitch (payment gateway)
+STITCH_CLIENT_ID=
+STITCH_CLIENT_SECRET=
+STITCH_WEBHOOK_SECRET=
 PLATFORM_COMMISSION_RATE=0.08   # e.g. 8% — never hardcode this
+
+# QR Code signing (waybill system)
+QR_SECRET=                      # 32+ random chars — signs DROP-OFF and COLLECTION QR tokens
 
 # The Courier Guy
 TCG_API_KEY= 54041081|6SxxLLpujh5lV91PJjrVuxmO3aE38y6qgQubcFbG33fbe7be

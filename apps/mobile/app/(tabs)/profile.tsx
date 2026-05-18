@@ -22,6 +22,7 @@ type Profile = {
   full_name: string;
   email: string;
   role: string;
+  admin_verified: boolean;
   is_age_verified: boolean;
   province: string | null;
   city_id: string | null;
@@ -485,6 +486,11 @@ export default function ProfileScreen() {
               <Pencil size={14} strokeWidth={2} color={BLUE} />
               <Text style={styles.editBtnText}>Edit profile</Text>
             </TouchableOpacity>
+            {profile?.role === 'admin' && profile?.admin_verified && (
+              <TouchableOpacity style={styles.scanBtn} onPress={() => router.push('/admin/scan' as never)}>
+                <Text style={styles.scanBtnText}>📷 Scan QR</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.signOutBtn} onPress={signOut}>
               <Text style={styles.signOutText}>Sign out</Text>
             </TouchableOpacity>
@@ -709,4 +715,7 @@ const styles = StyleSheet.create({
   emptyWrap: { alignItems: 'center', paddingTop: 48, paddingBottom: 40 },
   emptyTitle: { color: '#111', fontSize: 15, fontWeight: '600', marginTop: 12 },
   emptyText: { color: '#979797', fontSize: 13, marginTop: 4 },
+
+  scanBtn:     { flex: 1, borderWidth: 1, borderColor: '#111', borderRadius: 30, paddingVertical: 10, alignItems: 'center' },
+  scanBtnText: { color: '#111', fontWeight: '600', fontSize: 14 },
 });

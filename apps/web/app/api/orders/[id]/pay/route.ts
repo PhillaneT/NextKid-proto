@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { sendOrderNotification } from '@/lib/notifications'
+import {
+  generateWaybillNumber,
+  generateQrToken,
+  DROPOFF_TTL_HOURS,
+} from '@/lib/qr'
 
-// RULE: This is a DEMO payment endpoint. It simulates Peach Payments escrow by
-// advancing the order directly to AWAITING_SHIPMENT_BOOKING without real card
-// processing. When Peach Payments credentials arrive, replace the status
-// transition here with a real delayed-capture payment initiation, and move the
-// status advance to the Peach Payments webhook handler (payment.held event).
+// RULE: This is a DEMO payment endpoint. It simulates Stitch escrow by
+// advancing the order directly to AWAITING_DROPOFF without real payment
+// processing. When Stitch credentials arrive, replace the status transition
+// here with a real Stitch payment initiation, and move the status advance
+// to the Stitch webhook handler (payment.complete event).
 //
 // PROTOTYPE TRADE-OFF: documented in CLAUDE.md "Known Prototype Trade-offs".
 
@@ -50,18 +55,17 @@ export async function POST(
     return NextResponse.json({ error: 'order_not_payable', status: order.status }, { status: 409 })
   }
 
-  // 3. Advance order status
-  // RULE: In production this becomes two steps:
-  //   a. Initiate Peach Payments delayed-capture → status = PAYMENT_HELD
-  //   b. Peach webhook (payment.captured) → status = AWAITING_SHIPMENT_BOOKING
-  // For demo we go straight to AWAITING_SHIPMENT_BOOKING in one step.
-  const now = new Date().toISOString()
+  // 3. Advance order to AWAITING_DROPOFF and set auto-cancel deadline (72h)
+  const now           = new Date()
+  const autoDropoffAt = new Date(now.getTime() + DROPOFF_TTL_HOURS * 60 * 60 * 1000)
+
   const { error: updateError } = await server
     .from('orders')
     .update({
-      status: 'AWAITING_SHIPMENT_BOOKING',
-      payment_status: 'HELD',
-      paid_at: now,
+      status:          'AWAITING_DROPOFF',
+      payment_status:  'HELD',
+      paid_at:         now.toISOString(),
+      auto_dropoff_at: autoDropoffAt.toISOString(),
     })
     .eq('id', orderId)
 
@@ -70,27 +74,63 @@ export async function POST(
     return NextResponse.json({ error: 'update_failed' }, { status: 500 })
   }
 
-  // 4. Append order events (RULE: never delete or mutate order history)
+  // 4. Generate waybill number + DROP-OFF QR token
+  const waybillNumber = generateWaybillNumber()
+  const dropoffQr     = generateQrToken('DROPOFF', orderId, waybillNumber, DROPOFF_TTL_HOURS)
+
+  // 4a. Insert waybill
+  const { data: waybill, error: waybillError } = await server
+    .from('waybills')
+    .insert({ waybill_number: waybillNumber, order_id: orderId })
+    .select('id')
+    .single()
+
+  if (waybillError || !waybill) {
+    console.error('Waybill insert error:', waybillError)
+    // Non-fatal for prototype — order is paid, waybill can be regenerated
+  } else {
+    // 4b. Insert DROP-OFF QR token
+    const { error: qrError } = await server
+      .from('qr_tokens')
+      .insert({
+        order_id:   orderId,
+        waybill_id: waybill.id,
+        token_type: 'DROPOFF',
+        token_raw:  dropoffQr.token,
+        token_hash: dropoffQr.hash,
+        expires_at: dropoffQr.expiresAt.toISOString(),
+      })
+
+    if (qrError) {
+      console.error('QR token insert error:', qrError)
+    }
+  }
+
+  // 5. Append order events (RULE: never delete or mutate order history)
   await server.from('order_events').insert([
     {
-      order_id: orderId,
+      order_id:    orderId,
       from_status: 'PENDING_PAYMENT',
-      to_status: 'PAYMENT_HELD',
-      note: 'Demo payment initiated',
-      created_by: buyerId,
+      to_status:   'PAYMENT_HELD',
+      note:        'Demo payment initiated — funds held in Stitch escrow',
+      created_by:  buyerId,
     },
     {
-      order_id: orderId,
+      order_id:    orderId,
       from_status: 'PAYMENT_HELD',
-      to_status: 'AWAITING_SHIPMENT_BOOKING',
-      note: 'Demo payment confirmed — funds held in escrow',
-      created_by: buyerId,
+      to_status:   'AWAITING_DROPOFF',
+      note:        `Waybill ${waybillNumber} generated — seller notified to drop off item`,
+      created_by:  buyerId,
     },
   ])
 
-  // Fire-and-forget notifications (don't block the response)
-  sendOrderNotification({ orderId, newStatus: 'AWAITING_SHIPMENT_BOOKING', triggeredBy: 'buyer' })
+  // 6. Notify seller (fire-and-forget)
+  sendOrderNotification({ orderId, newStatus: 'AWAITING_DROPOFF', triggeredBy: 'buyer' })
     .catch(err => console.error('[Notifications] pay route error:', err))
 
-  return NextResponse.json({ success: true, newStatus: 'AWAITING_SHIPMENT_BOOKING' })
+  return NextResponse.json({
+    success:       true,
+    newStatus:     'AWAITING_DROPOFF',
+    waybillNumber,
+  })
 }

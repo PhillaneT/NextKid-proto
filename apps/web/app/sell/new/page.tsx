@@ -199,7 +199,7 @@ export default function NewListingPage() {
       seller_id:            user.id,
       title:                form.title,
       description:          form.description || null,
-      // RULE: price stored in cents — matches Peach Payments ZAR format
+      // RULE: price stored in cents — Stitch processes ZAR in cents natively
       price_cents:          Math.round(parseFloat(form.price) * 100),
       condition:            form.condition.toUpperCase(),
       category,

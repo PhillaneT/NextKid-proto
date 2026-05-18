@@ -1,14 +1,16 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Alert, Image,
+  StyleSheet, ActivityIndicator, Alert, Image, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
+import { WEB_API_BASE } from '@/src/lib/api';
+import QRCode from 'react-native-qrcode-svg';
 import {
   ArrowLeft, Package, Truck, CheckCircle2, Clock,
-  XCircle, AlertTriangle, ShieldCheck, Banknote, Lock,
+  XCircle, AlertTriangle, ShieldCheck, Banknote, Lock, Timer,
 } from 'lucide-react-native';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -16,6 +18,8 @@ import {
 type Order = {
   id: string;
   status: string;
+  buyer_id: string;
+  seller_id: string;
   item_price_cents: number;
   shipping_cost_cents: number;
   total_paid_cents: number;
@@ -58,12 +62,10 @@ function fmtDate(iso: string | null) {
 // ── Timeline ──────────────────────────────────────────────────────────────────
 
 const TIMELINE = [
-  { statuses: ['PENDING_PAYMENT'],                              label: 'Ordered' },
-  { statuses: ['PAYMENT_HELD', 'AWAITING_SHIPMENT_BOOKING'],   label: 'Paid' },
-  { statuses: ['SHIPMENT_BOOKED', 'SHIPPED'],                   label: 'Shipped' },
-  { statuses: ['IN_TRANSIT', 'OUT_FOR_DELIVERY'],               label: 'In transit' },
-  { statuses: ['DELIVERED'],                                    label: 'Delivered' },
-  { statuses: ['COMPLETED'],                                    label: 'Complete' },
+  { statuses: ['PENDING_PAYMENT'],   label: 'Ordered' },
+  { statuses: ['AWAITING_DROPOFF'],  label: 'Paid' },
+  { statuses: ['ITEM_AT_HUB'],       label: 'At hub' },
+  { statuses: ['COMPLETED'],         label: 'Complete' },
 ];
 
 function timelineIdx(status: string) {
@@ -80,15 +82,16 @@ function DemoPayForm({ order, onPaid }: { order: Order; onPaid: () => void }) {
     if (!name.trim()) { Alert.alert('Required', 'Please enter the name on the card.'); return; }
     setPaying(true);
 
-    // RULE: advance PENDING_PAYMENT → AWAITING_SHIPMENT_BOOKING directly via Supabase
-    const { error } = await supabase.from('orders').update({
-      status: 'AWAITING_SHIPMENT_BOOKING',
-      payment_status: 'HELD',
-      paid_at: new Date().toISOString(),
-    }).eq('id', order.id).eq('status', 'PENDING_PAYMENT');
+    // RULE: call the API so waybill + DROP-OFF QR are generated server-side
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { Alert.alert('Session expired'); setPaying(false); return; }
 
+    const res = await fetch(`${WEB_API_BASE}/api/orders/${order.id}/pay`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
     setPaying(false);
-    if (error) { Alert.alert('Payment failed', error.message); return; }
+    if (!res.ok) { Alert.alert('Payment failed', 'Please try again.'); return; }
     onPaid();
   };
 
@@ -170,6 +173,97 @@ function DemoPayForm({ order, onPaid }: { order: Order; onPaid: () => void }) {
   );
 }
 
+// ── QR Panel ─────────────────────────────────────────────────────────────────
+
+function QrMobilePanel({
+  orderId,
+  tokenType,
+  label,
+  instructions,
+  accent = 'blue',
+}: {
+  orderId:      string
+  tokenType:    'dropoff' | 'collection'
+  label:        string
+  instructions: string
+  accent?:      'blue' | 'green'
+}) {
+  const [token,         setToken]         = useState<string | null>(null)
+  const [waybillNumber, setWaybillNumber] = useState<string | null>(null)
+  const [expiresAt,     setExpiresAt]     = useState<string | null>(null)
+  const [loading,       setLoading]       = useState(true)
+  const [error,         setError]         = useState('')
+
+  useEffect(() => {
+    async function fetch_() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { setError('Session expired.'); setLoading(false); return }
+
+      const res = await fetch(`${WEB_API_BASE}/api/orders/${orderId}/qr/${tokenType}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (!res.ok) {
+        setError(tokenType === 'collection'
+          ? 'Collection QR not ready yet.'
+          : 'QR not available.')
+        setLoading(false)
+        return
+      }
+      const data = await res.json()
+      setToken(data.token)
+      setWaybillNumber(data.waybillNumber)
+      setExpiresAt(data.expiresAt)
+      setLoading(false)
+    }
+    fetch_()
+  }, [orderId, tokenType])
+
+  const bg      = accent === 'blue'  ? '#eff6ff' : '#f0fdf4'
+  const border  = accent === 'blue'  ? '#bfdbfe' : '#bbf7d0'
+  const title   = accent === 'blue'  ? '#1e40af' : '#166534'
+  const sub     = accent === 'blue'  ? '#2563eb' : '#15803d'
+
+  const expiry = expiresAt
+    ? new Date(expiresAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : null
+
+  return (
+    <View style={[styles.qrPanel, { backgroundColor: bg, borderColor: border }]}>
+      <Text style={[styles.qrPanelLabel, { color: title }]}>{label}</Text>
+      <Text style={[styles.qrPanelInstructions, { color: sub }]}>{instructions}</Text>
+
+      {loading && <ActivityIndicator color={CRIMSON} style={{ marginVertical: 24 }} />}
+      {!!error  && <Text style={styles.qrError}>{error}</Text>}
+
+      {!loading && !error && token && (
+        <View style={styles.qrContent}>
+          <View style={styles.qrBox}>
+            <QRCode value={token} size={180} />
+          </View>
+
+          {waybillNumber && (
+            <View style={styles.qrWaybillRow}>
+              <Text style={styles.qrWaybillLabel}>Waybill</Text>
+              <Text style={styles.qrWaybillNumber}>{waybillNumber}</Text>
+            </View>
+          )}
+
+          {expiry && (
+            <View style={styles.qrExpiryRow}>
+              <Timer size={11} strokeWidth={2} color="#979797" />
+              <Text style={styles.qrExpiryText}>Valid until {expiry}</Text>
+            </View>
+          )}
+
+          <Text style={styles.qrShareNote}>
+            Fully shareable — only a verified Klerebank Admin can action it.
+          </Text>
+        </View>
+      )}
+    </View>
+  )
+}
+
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function OrderDetailScreen() {
@@ -178,18 +272,21 @@ export default function OrderDetailScreen() {
 
   const [order,      setOrder]      = useState<Order | null>(null);
   const [listing,    setListing]    = useState<Listing | null>(null);
-  const [loading,    setLoading]    = useState(true);
-  const [confirming, setConfirming] = useState(false);
+  const [loading,           setLoading]           = useState(true);
+  const [confirming,        setConfirming]        = useState(false);
+  const [showConfirmModal,  setShowConfirmModal]  = useState(false);
+  const [userId,            setUserId]            = useState('');
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.replace('/' as never); return; }
+    setUserId(user.id);
 
     const { data: orderData } = await supabase
       .from('orders')
-      .select('id, status, item_price_cents, shipping_cost_cents, total_paid_cents, shipping_method, waybill_number, estimated_delivery, delivery_locker_name, created_at, paid_at, shipped_at, delivered_at, completed_at, listing_id, platform_commission_rate')
+      .select('id, status, buyer_id, seller_id, item_price_cents, shipping_cost_cents, total_paid_cents, shipping_method, waybill_number, estimated_delivery, delivery_locker_name, created_at, paid_at, shipped_at, delivered_at, completed_at, listing_id, platform_commission_rate')
       .eq('id', orderId)
-      .eq('buyer_id', user.id)
+      .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
       .single();
 
     if (!orderData) { setLoading(false); return; }
@@ -203,34 +300,26 @@ export default function OrderDetailScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const handleConfirmReceipt = async () => {
+  const handleConfirmReceipt = () => {
     if (!order) return;
-    Alert.alert(
-      'Confirm receipt',
-      'Confirm you received your item in good condition. This releases payment to the seller.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Yes, I received it',
-          onPress: async () => {
-            setConfirming(true);
-            // RULE: advance DELIVERED → COMPLETED, calculate and store commission
-            const commission = Math.round(order.item_price_cents * COMMISSION_RATE);
-            const { error } = await supabase.from('orders').update({
-              status: 'COMPLETED',
-              payment_status: 'CAPTURED',
-              platform_commission_cents: commission,
-              seller_payout_cents: order.item_price_cents - commission,
-              completed_at: new Date().toISOString(),
-            }).eq('id', order.id).eq('status', 'DELIVERED');
+    setShowConfirmModal(true);
+  };
 
-            setConfirming(false);
-            if (error) { Alert.alert('Error', error.message); return; }
-            await load();
-          },
-        },
-      ]
-    );
+  const doConfirm = async () => {
+    if (!order) return;
+    setShowConfirmModal(false);
+    setConfirming(true);
+    const commission = Math.round(order.item_price_cents * COMMISSION_RATE);
+    const { error } = await supabase.from('orders').update({
+      status:                    'COMPLETED',
+      payment_status:            'CAPTURED',
+      platform_commission_cents: commission,
+      seller_payout_cents:       order.item_price_cents - commission,
+      completed_at:              new Date().toISOString(),
+    }).eq('id', order.id).eq('status', 'DELIVERED');
+    setConfirming(false);
+    if (error) { Alert.alert('Error', error.message); return; }
+    await load();
   };
 
   if (loading) {
@@ -259,12 +348,15 @@ export default function OrderDetailScreen() {
   const cover        = listing?.images?.[0] ?? null;
   const title        = listing?.title ?? 'Item';
   const idx          = timelineIdx(order.status);
-  const isCancelled  = ['CANCELLED', 'AUTO_CANCELLED'].includes(order.status);
-  const isDisputed   = order.status === 'DISPUTED';
-  const isPending    = order.status === 'PENDING_PAYMENT';
-  const isDelivered  = order.status === 'DELIVERED';
-  const isCompleted  = order.status === 'COMPLETED';
-  const isInTransit  = ['SHIPMENT_BOOKED', 'SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(order.status);
+  const isSeller          = order.seller_id === userId;
+  const isCancelled       = ['CANCELLED', 'AUTO_CANCELLED'].includes(order.status);
+  const isDisputed        = order.status === 'DISPUTED';
+  const isPending         = order.status === 'PENDING_PAYMENT';
+  const isDelivered       = order.status === 'DELIVERED';
+  const isCompleted       = order.status === 'COMPLETED';
+  const isAwaitingDropoff = order.status === 'AWAITING_DROPOFF';
+  const isAtHub           = order.status === 'ITEM_AT_HUB';
+  const isInTransit       = ['SHIPMENT_BOOKED', 'SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(order.status);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -307,7 +399,7 @@ export default function OrderDetailScreen() {
         {/* Timeline */}
         {!isCancelled && !isDisputed && idx >= 0 && (
           <View style={styles.timeline}>
-            {TIMELINE.map((step, i) => (
+            {TIMELINE.map((_step, i) => (
               <View key={i} style={styles.timelineStep}>
                 {/* Left connector */}
                 <View style={[styles.timelineLine, { backgroundColor: i === 0 ? 'transparent' : i <= idx ? CRIMSON : BORDER }]} />
@@ -357,6 +449,50 @@ export default function OrderDetailScreen() {
         {/* State-specific panels */}
 
         {isPending && <DemoPayForm order={order} onPaid={load} />}
+
+        {/* AWAITING_DROPOFF: seller shows DROP-OFF QR, buyer waits */}
+        {isAwaitingDropoff && isSeller && (
+          <QrMobilePanel
+            orderId={order.id}
+            tokenType="dropoff"
+            label="Your Drop-Off QR"
+            instructions="Show or print this at any Klerebank location. The admin scans it to confirm they've received your item."
+            accent="blue"
+          />
+        )}
+        {isAwaitingDropoff && !isSeller && (
+          <View style={styles.infoBox}>
+            <ShieldCheck size={18} strokeWidth={1.5} color="#2563eb" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoTitle}>Payment held in escrow</Text>
+              <Text style={styles.infoText}>
+                Your {fmt(order.total_paid_cents)} is locked safely. The seller must drop the item at a Klerebank hub within 3 days. You'll get your collection QR once it's confirmed.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* ITEM_AT_HUB: buyer shows COLLECTION QR, seller sees confirmation */}
+        {isAtHub && !isSeller && (
+          <QrMobilePanel
+            orderId={order.id}
+            tokenType="collection"
+            label="Your Collection QR"
+            instructions="Show this at any Klerebank location to collect your item. You can share it with someone collecting on your behalf."
+            accent="green"
+          />
+        )}
+        {isAtHub && isSeller && (
+          <View style={[styles.infoBox, styles.infoBoxGreen]}>
+            <CheckCircle2 size={18} strokeWidth={1.5} color="#16a34a" />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.infoTitle, { color: '#166534' }]}>Item received at Klerebank hub</Text>
+              <Text style={[styles.infoText, { color: '#15803d' }]}>
+                The buyer has been sent their collection QR. Once they collect, payment will be released to you automatically.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {order.status === 'AWAITING_SHIPMENT_BOOKING' && (
           <View style={styles.infoBox}>
@@ -467,6 +603,53 @@ export default function OrderDetailScreen() {
         </View>
 
       </ScrollView>
+
+      {/* ── Confirm receipt modal ─────────────────────────────────────── */}
+      <Modal
+        visible={showConfirmModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowConfirmModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            {/* Header */}
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Satisfied with your item?</Text>
+
+            {/* Security warning */}
+            <Text style={styles.modalBody}>
+              For security reasons, please make sure to confirm{' '}
+              <Text style={{ fontWeight: '700' }}>only</Text>
+              {' '}when you have actually received the item and are happy with it.
+            </Text>
+
+            {/* Funds agreement */}
+            <View style={styles.modalAgreement}>
+              <Text style={styles.modalAgreementText}>
+                By tapping "Confirm" you agree to the release of the funds to the Seller.
+              </Text>
+            </View>
+
+            {/* Buttons */}
+            <View style={styles.modalBtns}>
+              <TouchableOpacity
+                style={styles.modalBtnBack}
+                onPress={() => setShowConfirmModal(false)}
+              >
+                <Text style={styles.modalBtnBackText}>Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalBtnConfirm}
+                onPress={doConfirm}
+              >
+                <Text style={styles.modalBtnConfirmText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -543,4 +726,32 @@ const styles = StyleSheet.create({
   footerBtns:    { flexDirection: 'row', gap: 10, marginTop: 8 },
   outlineBtn:    { flex: 1, borderWidth: 1, borderColor: BORDER, borderRadius: 30, padding: 14, alignItems: 'center' },
   outlineBtnText: { color: '#111', fontWeight: '600', fontSize: 14 },
+
+  // QR panel
+  qrPanel:            { borderRadius: 18, borderWidth: 1, padding: 16, marginBottom: 12 },
+  qrPanelLabel:       { fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  qrPanelInstructions:{ fontSize: 12, lineHeight: 17, marginBottom: 12 },
+  qrError:            { color: '#dc2626', fontSize: 12, textAlign: 'center', paddingVertical: 12 },
+  qrContent:          { alignItems: 'center', gap: 10 },
+  qrBox:              { backgroundColor: '#fff', padding: 12, borderRadius: 14, borderWidth: 1, borderColor: '#dedede' },
+  qrWaybillRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  qrWaybillLabel:     { color: '#979797', fontSize: 12 },
+  qrWaybillNumber:    { fontFamily: 'monospace', fontWeight: '700', fontSize: 14, color: '#111' },
+  qrExpiryRow:        { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  qrExpiryText:       { color: '#979797', fontSize: 11 },
+  qrShareNote:        { color: '#979797', fontSize: 10, textAlign: 'center', maxWidth: 240, lineHeight: 14 },
+
+  // Confirm receipt modal
+  modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalSheet:          { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 40, gap: 16 },
+  modalHandle:         { width: 40, height: 4, borderRadius: 2, backgroundColor: '#dedede', alignSelf: 'center', marginBottom: 8 },
+  modalTitle:          { color: '#111', fontSize: 22, fontWeight: '800', lineHeight: 28 },
+  modalBody:           { color: '#555', fontSize: 14, lineHeight: 22 },
+  modalAgreement:      { backgroundColor: '#f4f4f4', borderRadius: 14, padding: 14 },
+  modalAgreementText:  { color: '#111', fontSize: 13, fontWeight: '600', lineHeight: 20 },
+  modalBtns:           { flexDirection: 'row', gap: 12, marginTop: 4 },
+  modalBtnBack:        { flex: 1, borderWidth: 1.5, borderColor: BORDER, borderRadius: 30, paddingVertical: 14, alignItems: 'center' },
+  modalBtnBackText:    { color: '#111', fontWeight: '600', fontSize: 15 },
+  modalBtnConfirm:     { flex: 2, backgroundColor: CRIMSON, borderRadius: 30, paddingVertical: 14, alignItems: 'center' },
+  modalBtnConfirmText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

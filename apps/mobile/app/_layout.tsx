@@ -46,6 +46,16 @@ export default function RootLayout() {
         <Stack.Screen name="checkout/[listingId]" />
         <Stack.Screen name="cart" />
         <Stack.Screen
+          name="admin/scan"
+          options={{
+            headerShown: true,
+            headerTitle: 'Klerebank Scanner',
+            headerStyle: { backgroundColor: '#111' },
+            headerTintColor: '#fff',
+            presentation: 'modal',
+          }}
+        />
+        <Stack.Screen
           name="item/[id]"
           options={{
             headerShown: true,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { sendOrderNotification } from '@/lib/notifications'
 
 // RULE: This is a DEMO payment endpoint. It simulates Peach Payments escrow by
 // advancing the order directly to AWAITING_SHIPMENT_BOOKING without real card
@@ -86,6 +87,10 @@ export async function POST(
       created_by: buyerId,
     },
   ])
+
+  // Fire-and-forget notifications (don't block the response)
+  sendOrderNotification({ orderId, newStatus: 'AWAITING_SHIPMENT_BOOKING', triggeredBy: 'buyer' })
+    .catch(err => console.error('[Notifications] pay route error:', err))
 
   return NextResponse.json({ success: true, newStatus: 'AWAITING_SHIPMENT_BOOKING' })
 }

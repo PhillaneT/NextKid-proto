@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { SA_PROVINCES } from '@nextkid/shared';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import {
@@ -8,7 +9,6 @@ import {
   Tag, Clock, ShoppingBag, Pencil, X, Check, Home, Search, LocateFixed,
 } from 'lucide-react';
 import Image from 'next/image';
-import { SA_PROVINCES } from '@nextkid/shared';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -108,13 +108,15 @@ export default function ProfilePage() {
   const [editStreet, setEditStreet]         = useState('');
   const [editPostalCode, setEditPostalCode] = useState('');
   const [editProvince, setEditProvince]     = useState('');
-  const [cities, setCities]                 = useState<CityOption[]>([]);
   const [editCityId, setEditCityId]         = useState('');
   const [editCityName, setEditCityName]     = useState('');
+  const [cityQuery, setCityQuery]           = useState('');
+  const [cityResults, setCityResults]       = useState<(CityOption & { province_code: string })[]>([]);
+  const [searchingCities, setSearchingCities] = useState(false);
+  const [cityInputFocused, setCityInputFocused] = useState(false);
   const [suburbs, setSuburbs]               = useState<SuburbOption[]>([]);
   const [editSuburbId, setEditSuburbId]     = useState('');
   const [editSuburbName, setEditSuburbName] = useState('');
-  const [loadingCities, setLoadingCities]   = useState(false);
   const [loadingSuburbs, setLoadingSuburbs] = useState(false);
   const [savingAddress, setSavingAddress]   = useState(false);
   const [addressError, setAddressError]     = useState('');
@@ -131,8 +133,7 @@ export default function ProfilePage() {
   const [savingQuickLocker, setSavingQuickLocker] = useState(false);
 
   // Suppress cascade resets when location is pre-filled from profile
-  const skipProvinceRef = useRef('');
-  const skipCityRef     = useRef('');
+  const skipCityRef = useRef('');
 
   // ── Schools edit state ────────────────────────────────────────────────────────
   // RULE: schools are independent of delivery address — a user can follow schools
@@ -177,14 +178,41 @@ export default function ProfilePage() {
 
   // ── Cascade: province → cities ───────────────────────────────────────────────
   useEffect(() => {
-    if (!editProvince) { setCities([]); setEditCityId(''); setEditCityName(''); return; }
-    if (skipProvinceRef.current === editProvince) { skipProvinceRef.current = ''; return; }
-    setLoadingCities(true);
-    fetch(`/api/locations/cities?province=${encodeURIComponent(editProvince)}`)
-      .then(r => r.json())
-      .then(data => { setCities(Array.isArray(data) ? data : []); setLoadingCities(false); });
-    setEditCityId(''); setEditCityName(''); setSuburbs([]); setEditSuburbId(''); setEditSuburbName('');
+    return; // Province cascade removed — city is now searched directly
   }, [editProvince]);
+
+  // City search — type 2 letters to find any SA city
+  useEffect(() => {
+    if (cityQuery.trim().length < 2) { setCityResults([]); return; }
+    if (cityQuery === editCityName) return; // already selected, don't re-search
+    const timer = setTimeout(async () => {
+      setSearchingCities(true);
+      try {
+        const params = new URLSearchParams({ q: cityQuery.trim() });
+        if (editProvince) params.set('province', editProvince);
+        const res = await fetch(`/api/locations/cities/search?${params}`);
+        const data = await res.json();
+        setCityResults(Array.isArray(data) ? data : []);
+      } catch { setCityResults([]); }
+      finally { setSearchingCities(false); }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [cityQuery, editCityName, editProvince]);
+
+  const handleCitySelect = (city: CityOption & { province_code: string }) => {
+    setEditCityId(city.id);
+    setEditCityName(city.name);
+    setCityQuery(city.name);
+    setCityResults([]);
+    setCityInputFocused(false);
+    setEditProvince(city.province_code);
+    setSuburbs([]); setEditSuburbId(''); setEditSuburbName('');
+    setLoadingSuburbs(true);
+    fetch(`/api/locations/suburbs?cityId=${encodeURIComponent(city.id)}`)
+      .then(r => r.json())
+      .then(data => { setSuburbs(Array.isArray(data) ? data : []); setLoadingSuburbs(false); })
+      .catch(() => setLoadingSuburbs(false));
+  };
 
   // ── Cascade: city → suburbs ──────────────────────────────────────────────────
   useEffect(() => {
@@ -197,18 +225,17 @@ export default function ProfilePage() {
     setEditSuburbId(''); setEditSuburbName('');
   }, [editCityId]);
 
-  // ── School search: debounced national search ──────────────────────────────────
+  // ── School search: debounced national search via API ─────────────────────────
   useEffect(() => {
     if (!schoolQuery || schoolQuery.length < 2) { setSchoolResults([]); return; }
     const timer = setTimeout(async () => {
       setSearchingSchools(true);
-      const { data } = await supabase
-        .from('schools')
-        .select('id, name, city_name, province_code')
-        .ilike('name', `%${schoolQuery}%`)
-        .limit(10);
-      setSchoolResults((data ?? []) as SchoolRow[]);
-      setSearchingSchools(false);
+      try {
+        const res = await fetch(`/api/locations/schools/search?q=${encodeURIComponent(schoolQuery.trim())}&limit=15`);
+        const data = await res.json();
+        setSchoolResults(Array.isArray(data) ? data as SchoolRow[] : []);
+      } catch { setSchoolResults([]); }
+      finally { setSearchingSchools(false); }
     }, 300);
     return () => clearTimeout(timer);
   }, [schoolQuery]);
@@ -239,20 +266,16 @@ export default function ProfilePage() {
     setLockerResults([]);
     setAddressError('');
 
-    if (profile.province && profile.city_id && profile.suburb_id) {
-      const [citiesRes, suburbsRes] = await Promise.all([
-        fetch(`/api/locations/cities?province=${encodeURIComponent(profile.province)}`).then(r => r.json()),
-        fetch(`/api/locations/suburbs?cityId=${encodeURIComponent(profile.city_id)}`).then(r => r.json()),
-      ]);
-      skipProvinceRef.current = profile.province;
+    if (profile.city_id && profile.suburb_id) {
+      const suburbsRes = await fetch(`/api/locations/suburbs?cityId=${encodeURIComponent(profile.city_id)}`).then(r => r.json());
       skipCityRef.current = profile.city_id;
-      setCities(Array.isArray(citiesRes) ? citiesRes : []);
       setSuburbs(Array.isArray(suburbsRes) ? suburbsRes : []);
     }
 
     setEditProvince(profile.province ?? '');
     setEditCityId(profile.city_id ?? '');
     setEditCityName(profile.city_name ?? '');
+    setCityQuery(profile.city_name ?? '');
     setEditSuburbId(profile.suburb_id ?? '');
     setEditSuburbName(profile.suburb_name ?? '');
     setEditingAddress(true);
@@ -441,7 +464,11 @@ export default function ProfilePage() {
                 <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Province</label>
                 <select
                   value={editProvince}
-                  onChange={e => setEditProvince(e.target.value)}
+                  onChange={e => {
+                    setEditProvince(e.target.value);
+                    setCityQuery(''); setEditCityId(''); setEditCityName('');
+                    setSuburbs([]); setEditSuburbId(''); setEditSuburbName('');
+                  }}
                   className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
                 >
                   <option value="">Select province...</option>
@@ -449,25 +476,43 @@ export default function ProfilePage() {
                 </select>
               </div>
 
-              {/* City */}
-              {editProvince && (
-                <div>
-                  <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">City</label>
-                  <select
-                    value={editCityId}
-                    onChange={e => {
-                      const opt = cities.find(c => c.id === e.target.value);
-                      setEditCityId(e.target.value);
-                      setEditCityName(opt?.name ?? '');
-                    }}
-                    disabled={loadingCities}
-                    className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition disabled:opacity-50"
-                  >
-                    <option value="">{loadingCities ? 'Loading...' : 'Select city...'}</option>
-                    {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-              )}
+              {/* City search */}
+              <div className="relative">
+                <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">City</label>
+                <input
+                  value={cityQuery}
+                  onChange={e => {
+                    setCityQuery(e.target.value);
+                    if (e.target.value !== editCityName) {
+                      setEditCityId(''); setEditCityName('');
+                      setSuburbs([]); setEditSuburbId(''); setEditSuburbName('');
+                    }
+                  }}
+                  onFocus={() => setCityInputFocused(true)}
+                  onBlur={() => setTimeout(() => setCityInputFocused(false), 150)}
+                  placeholder="Type 2 letters to search (e.g. Jo, Ca, Pre...)"
+                  autoComplete="off"
+                  className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
+                />
+                {searchingCities && <span className="absolute right-3 top-9 text-xs text-[#979797]">...</span>}
+                {editCityId && <span className="absolute right-3 top-9 text-sm font-bold text-[#BE1E2D]">✓</span>}
+
+                {cityResults.length > 0 && cityInputFocused && (
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-[#dedede] rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {cityResults.map(city => (
+                      <button
+                        key={city.id}
+                        type="button"
+                        onMouseDown={() => handleCitySelect(city)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-[#fde8ea] transition border-b border-[#f4f4f4] last:border-0"
+                      >
+                        <p className="text-sm font-semibold text-[#111]">{city.name}</p>
+                        <p className="text-xs text-[#979797]">{city.province_code}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Suburb */}
               {editCityId && (

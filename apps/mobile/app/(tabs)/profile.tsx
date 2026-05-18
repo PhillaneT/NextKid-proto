@@ -7,10 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
 import {
-  MapPin, School, CheckCircle2, AlertTriangle, Tag,
+  MapPin, School, CheckCircle2, Tag,
   ShoppingBag, Package, ChevronRight, Pencil, X, Check, Plus,
 } from 'lucide-react-native';
 import { SA_PROVINCES } from '@nextkid/shared';
+import { WEB_API_BASE } from '@/src/lib/api';
 
 const BLUE = '#BE1E2D';
 const BORDER = '#dedede';
@@ -23,15 +24,19 @@ type Profile = {
   role: string;
   is_age_verified: boolean;
   province: string | null;
+  city_id: string | null;
+  city_name: string | null;
+  suburb_id: string | null;
+  suburb_name: string | null;
   school_ids: string[] | null;
 };
 
-type SchoolRow = { id: string; name: string; city: string };
+type SchoolRow = { id: string; name: string; city_name: string; province_code?: string };
 
 type Item = {
   id: string;
   title: string;
-  price: number;
+  price_cents: number;
   images: string[];
   status: string;
   category: string;
@@ -74,6 +79,15 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editProvince, setEditProvince] = useState('');
+  const [editCityId, setEditCityId] = useState('');
+  const [editCityName, setEditCityName] = useState('');
+  const [editSuburbId, setEditSuburbId] = useState('');
+  const [editSuburbName, setEditSuburbName] = useState('');
+  const [cities, setCities] = useState<{ id: string; name: string }[]>([]);
+  const [suburbs, setSuburbs] = useState<{ id: string; name: string }[]>([]);
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [loadingSuburbs, setLoadingSuburbs] = useState(false);
+  const [expandedPanel, setExpandedPanel] = useState<'city' | 'suburb' | null>(null);
   const [editSchoolIds, setEditSchoolIds] = useState<string[]>([]);
   const [editSchools, setEditSchools] = useState<SchoolRow[]>([]);
   const [schoolSearch, setSchoolSearch] = useState('');
@@ -86,8 +100,8 @@ export default function ProfileScreen() {
 
     const [{ data: prof }, { data: items }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', user.id).single(),
-      supabase.from('items')
-        .select('id, title, price, images, status, category')
+      supabase.from('listings')
+        .select('id, title, price_cents, images, status, category')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false }),
     ]);
@@ -97,44 +111,82 @@ export default function ProfileScreen() {
 
     if (prof.school_ids?.length) {
       const { data: schoolData } = await supabase
-        .from('schools').select('id, name, city').in('id', prof.school_ids);
+        .from('schools').select('id, name, city_name, province_code').in('id', prof.school_ids);
       setSchools(schoolData ?? []);
     }
 
     const all = items ?? [];
-    setActiveListings(all.filter(i => i.status === 'active'));
-    setSoldListings(all.filter(i => i.status === 'sold'));
+    setActiveListings(all.filter(i => i.status === 'ACTIVE'));
+    setSoldListings(all.filter(i => i.status === 'SOLD'));
     setLoading(false);
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const startEdit = () => {
+  const startEdit = async () => {
     if (!profile) return;
     setEditName(profile.full_name);
     setEditProvince(profile.province ?? '');
+    setEditCityId(profile.city_id ?? '');
+    setEditCityName(profile.city_name ?? '');
+    setEditSuburbId(profile.suburb_id ?? '');
+    setEditSuburbName(profile.suburb_name ?? '');
     setEditSchoolIds(profile.school_ids ?? []);
     setEditSchools(schools);
     setSchoolSearch('');
     setSearchResults([]);
+    setExpandedPanel(null);
     setEditing(true);
+    // Pre-load cities + suburbs silently (no cascade resets)
+    if (profile.province) {
+      const { data } = await supabase.from('cities').select('id, name').eq('province_code', profile.province).order('name');
+      setCities(data ?? []);
+    }
+    if (profile.city_id) {
+      const { data } = await supabase.from('suburbs').select('id, name').eq('city_id', profile.city_id).order('name');
+      setSuburbs(data ?? []);
+    }
   };
 
   const cancelEdit = () => {
     setEditing(false);
     setSchoolSearch('');
     setSearchResults([]);
+    setExpandedPanel(null);
   };
 
-  // Search schools as user types — filter by province + name
+  const handleEditProvinceChange = async (prov: string) => {
+    setEditProvince(prov);
+    setEditCityId(''); setEditCityName(''); setEditSuburbId(''); setEditSuburbName('');
+    setCities([]); setSuburbs([]);
+    setExpandedPanel('city');
+    setLoadingCities(true);
+    const { data } = await supabase.from('cities').select('id, name').eq('province_code', prov).order('name');
+    setCities(data ?? []);
+    setLoadingCities(false);
+  };
+
+  const handleEditCityChange = async (id: string, name: string) => {
+    setEditCityId(id); setEditCityName(name);
+    setEditSuburbId(''); setEditSuburbName('');
+    setSuburbs([]);
+    setExpandedPanel('suburb');
+    setLoadingSuburbs(true);
+    const { data } = await supabase.from('suburbs').select('id, name').eq('city_id', id).order('name');
+    setSuburbs(data ?? []);
+    setLoadingSuburbs(false);
+  };
+
+  // Search schools — global search across all 25k+ SA schools via API
   const searchSchools = useCallback(async (query: string) => {
     setSchoolSearch(query);
     if (query.trim().length < 2) { setSearchResults([]); return; }
-    let q = supabase.from('schools').select('id, name, city').ilike('name', `%${query}%`).limit(8);
-    if (editProvince) q = q.eq('province', editProvince);
-    const { data } = await q;
-    setSearchResults((data ?? []).filter(s => !editSchoolIds.includes(s.id)));
-  }, [editProvince, editSchoolIds]);
+    try {
+      const res = await fetch(`${WEB_API_BASE}/api/locations/schools/search?q=${encodeURIComponent(query.trim())}&limit=10`);
+      const data = await res.json();
+      setSearchResults((Array.isArray(data) ? data as SchoolRow[] : []).filter(s => !editSchoolIds.includes(s.id)));
+    } catch { setSearchResults([]); }
+  }, [editSchoolIds]);
 
   const addSchool = (school: SchoolRow) => {
     setEditSchoolIds(prev => [...prev, school.id]);
@@ -152,20 +204,29 @@ export default function ProfileScreen() {
     if (!profile) return;
     setSaving(true);
     await supabase.from('profiles').update({
-      full_name: editName.trim(),
-      province: editProvince || null,
-      school_ids: editSchoolIds,
+      full_name:   editName.trim(),
+      province:    editProvince    || null,
+      city_id:     editCityId     || null,
+      city_name:   editCityName   || null,
+      suburb_id:   editSuburbId   || null,
+      suburb_name: editSuburbName || null,
+      school_ids:  editSchoolIds,
     }).eq('id', profile.id);
 
     setProfile(prev => prev ? {
       ...prev,
-      full_name: editName.trim(),
-      province: editProvince || null,
-      school_ids: editSchoolIds,
+      full_name:   editName.trim(),
+      province:    editProvince    || null,
+      city_id:     editCityId     || null,
+      city_name:   editCityName   || null,
+      suburb_id:   editSuburbId   || null,
+      suburb_name: editSuburbName || null,
+      school_ids:  editSchoolIds,
     } : prev);
     setSchools(editSchools);
     setSaving(false);
     setEditing(false);
+    setExpandedPanel(null);
   };
 
   const signOut = async () => {
@@ -184,7 +245,7 @@ export default function ProfileScreen() {
       {
         text: 'Remove', style: 'destructive',
         onPress: async () => {
-          await supabase.from('items').update({ status: 'delisted' }).eq('id', itemId);
+          await supabase.from('listings').update({ status: 'DELISTED' }).eq('id', itemId);
           setActiveListings(prev => prev.filter(i => i.id !== itemId));
         },
       },
@@ -201,7 +262,7 @@ export default function ProfileScreen() {
 
   const initials = profile?.full_name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() ?? '?';
   const displayListings = tab === 'active' ? activeListings : soldListings;
-  const totalEarned = soldListings.reduce((s, i) => s + i.price, 0);
+  const totalEarned = soldListings.reduce((s, i) => s + i.price_cents, 0);
 
   const renderListing = ({ item }: { item: Item }) => (
     <TouchableOpacity
@@ -219,7 +280,7 @@ export default function ProfileScreen() {
       <View style={styles.listingInfo}>
         <Text style={styles.listingCategory}>{item.category}</Text>
         <Text style={styles.listingTitle} numberOfLines={2}>{item.title}</Text>
-        <Text style={styles.listingPrice}>R{(item.price / 100).toLocaleString()}</Text>
+        <Text style={styles.listingPrice}>R{(item.price_cents / 100).toLocaleString()}</Text>
         <StatusDot status={item.status} />
       </View>
       <View style={styles.listingActions}>
@@ -254,10 +315,12 @@ export default function ProfileScreen() {
           <Text style={styles.email}>{profile?.email}</Text>
 
           {/* Location — view mode */}
-          {!editing && profile?.province && (
+          {!editing && (profile?.suburb_name || profile?.city_name || profile?.province) && (
             <View style={styles.infoRow}>
               <MapPin size={13} strokeWidth={2} color={BLUE} />
-              <Text style={styles.infoText}>{profile.province}</Text>
+              <Text style={styles.infoText}>
+                {[profile?.suburb_name, profile?.city_name, profile?.province].filter(Boolean).join(', ')}
+              </Text>
             </View>
           )}
 
@@ -282,11 +345,7 @@ export default function ProfileScreen() {
                 <TouchableOpacity
                   key={p}
                   style={[styles.provincePill, editProvince === p && styles.provincePillActive]}
-                  onPress={() => {
-                    setEditProvince(p);
-                    setSearchResults([]);
-                    setSchoolSearch('');
-                  }}
+                  onPress={() => { setSchoolSearch(''); setSearchResults([]); handleEditProvinceChange(p); }}
                 >
                   <Text style={[styles.provincePillText, editProvince === p && styles.provincePillTextActive]}>
                     {p}
@@ -295,6 +354,66 @@ export default function ProfileScreen() {
               ))}
             </View>
           </ScrollView>
+
+          {/* City picker */}
+          {editProvince && (
+            <>
+              <Text style={styles.editLabel}>City</Text>
+              <TouchableOpacity
+                style={[styles.locPickerBtn, editCityId && styles.locPickerBtnSelected]}
+                onPress={() => setExpandedPanel(expandedPanel === 'city' ? null : 'city')}
+              >
+                <Text style={[styles.locPickerText, editCityId && styles.locPickerTextSelected]}>
+                  {loadingCities ? 'Loading...' : editCityId ? editCityName : 'Select a city...'}
+                </Text>
+                <Text style={{ color: '#aaa' }}>▾</Text>
+              </TouchableOpacity>
+              {expandedPanel === 'city' && (
+                <View style={styles.locDropList}>
+                  {cities.map(c => (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[styles.locDropRow, editCityId === c.id && styles.locDropRowActive]}
+                      onPress={() => handleEditCityChange(c.id, c.name)}
+                    >
+                      <Text style={[styles.locDropText, editCityId === c.id && styles.locDropTextActive]}>{c.name}</Text>
+                      {editCityId === c.id && <Text style={{ color: BLUE }}>✓</Text>}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+
+          {/* Suburb picker */}
+          {editCityId && (
+            <>
+              <Text style={styles.editLabel}>Suburb</Text>
+              <TouchableOpacity
+                style={[styles.locPickerBtn, editSuburbId && styles.locPickerBtnSelected]}
+                onPress={() => setExpandedPanel(expandedPanel === 'suburb' ? null : 'suburb')}
+              >
+                <Text style={[styles.locPickerText, editSuburbId && styles.locPickerTextSelected]}>
+                  {loadingSuburbs ? 'Loading...' : editSuburbId ? editSuburbName : 'Select a suburb...'}
+                </Text>
+                <Text style={{ color: '#aaa' }}>▾</Text>
+              </TouchableOpacity>
+              {expandedPanel === 'suburb' && (
+                <View style={styles.locDropList}>
+                  {suburbs.map(s => (
+                    <TouchableOpacity
+                      key={s.id}
+                      style={[styles.locDropRow, editSuburbId === s.id && styles.locDropRowActive]}
+                      onPress={() => { setEditSuburbId(s.id); setEditSuburbName(s.name); setExpandedPanel(null); }}
+                    >
+                      <Text style={[styles.locDropText, editSuburbId === s.id && styles.locDropTextActive]}>{s.name}</Text>
+                      {editSuburbId === s.id && <Text style={{ color: BLUE }}>✓</Text>}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
 
           {/* School search */}
           <Text style={styles.editLabel}>Schools</Text>
@@ -314,7 +433,7 @@ export default function ProfileScreen() {
                 <TouchableOpacity key={s.id} style={styles.dropdownItem} onPress={() => addSchool(s)}>
                   <Plus size={13} strokeWidth={2.5} color={BLUE} />
                   <Text style={styles.dropdownText}>{s.name}</Text>
-                  <Text style={styles.dropdownCity}>{s.city}</Text>
+                  <Text style={styles.dropdownCity}>{s.city_name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -335,23 +454,13 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      {/* Badges — view mode only */}
+      {/* Role badge — view mode only */}
       {!editing && (
         <View style={styles.badgeRow}>
-          {profile?.is_age_verified ? (
-            <View style={[styles.badge, { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }]}>
-              <CheckCircle2 size={11} strokeWidth={2.5} color="#16a34a" />
-              <Text style={[styles.badgeText, { color: '#16a34a' }]}>Verified 18+</Text>
-            </View>
-          ) : (
-            <View style={[styles.badge, { backgroundColor: '#fffbeb', borderColor: '#fde68a' }]}>
-              <AlertTriangle size={11} strokeWidth={2.5} color="#ca8a04" />
-              <Text style={[styles.badgeText, { color: '#ca8a04' }]}>Browse only</Text>
-            </View>
-          )}
-          <View style={[styles.badge, { backgroundColor: '#eef0fb', borderColor: '#c7d2fe' }]}>
+          <View style={[styles.badge, { backgroundColor: '#fde8ea', borderColor: '#f9a8b0' }]}>
+            <CheckCircle2 size={11} strokeWidth={2.5} color={BLUE} />
             <Text style={[styles.badgeText, { color: BLUE, textTransform: 'capitalize' }]}>
-              {profile?.role?.replace('_', ' ')}
+              {profile?.role ?? 'buyer'}
             </Text>
           </View>
         </View>
@@ -509,6 +618,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#c7d2fe',
   },
   schoolChipText: { color: BLUE, fontSize: 12, fontWeight: '600' },
+
+  // Location cascade pickers (edit mode)
+  locPickerBtn: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#fff', borderWidth: 1, borderColor: BORDER,
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 4,
+  },
+  locPickerBtnSelected: { borderColor: BLUE },
+  locPickerText:        { color: '#979797', fontSize: 14, flex: 1 },
+  locPickerTextSelected:{ color: BLUE, fontWeight: '600', fontSize: 14 },
+  locDropList: {
+    borderWidth: 1, borderColor: BORDER, borderRadius: 10,
+    marginBottom: 6, maxHeight: 180, backgroundColor: '#fff', overflow: 'hidden',
+  },
+  locDropRow:       { padding: 12, borderBottomWidth: 1, borderBottomColor: BORDER, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  locDropRowActive: { backgroundColor: '#eef0ff' },
+  locDropText:      { color: '#111', fontSize: 13 },
+  locDropTextActive:{ color: BLUE, fontWeight: '700' },
 
   badgeRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 12 },
   badge: {

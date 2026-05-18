@@ -1,19 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, ActivityIndicator, Alert, FlatList,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '@/src/lib/supabase';
+import { WEB_API_BASE } from '@/src/lib/api';
 import { SA_PROVINCES } from '@nextkid/shared';
 
 type Step = 1 | 2 | 3;
 
 interface CityOption   { id: string; name: string }
 interface SuburbOption { id: string; name: string }
-interface SchoolOption { id: string; name: string; type: string; city_name: string }
+interface SchoolOption { id: string; name: string; type: string; suburb_name: string; city_name: string }
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export default function OnboardingScreen() {
   // Step 1
   const [fullName, setFullName] = useState('');
 
-  // Step 2
+  // Step 2 — optional DOB
   const [dob, setDob] = useState('');
 
   // Step 3 — location cascade
@@ -36,8 +37,10 @@ export default function OnboardingScreen() {
   const [suburbs, setSuburbs]       = useState<SuburbOption[]>([]);
   const [suburbId, setSuburbId]     = useState('');
   const [suburbName, setSuburbName] = useState('');
-  const [schools, setSchools]       = useState<SchoolOption[]>([]);
-  const [schoolSearch, setSchoolSearch] = useState('');
+  const [schools, setSchools]             = useState<SchoolOption[]>([]);
+  const [schoolSearch, setSchoolSearch]   = useState('');
+  const [globalSchools, setGlobalSchools] = useState<SchoolOption[]>([]);
+  const [searchingSchools, setSearchingSchools] = useState(false);
   const [selectedSchool, setSelectedSchool] = useState<SchoolOption | null>(null);
 
   const [loadingCities, setLoadingCities]   = useState(false);
@@ -89,19 +92,32 @@ export default function OnboardingScreen() {
     setExpandedPanel('suburb');
   }, [cityId]);
 
-  // Fetch schools when suburb changes
+  // Fetch schools by suburb/city for the location-based list (shown when no search query)
   useEffect(() => {
-    if (!suburbId) { setSchools([]); setSelectedSchool(null); return; }
+    if (!suburbId && !cityId) { setSchools([]); setSelectedSchool(null); return; }
     setLoadingSchools(true);
-    supabase.from('schools')
-      .select('id, name, type, city_name')
-      .eq('suburb_id', suburbId)
-      .eq('is_active', true)
-      .order('name')
-      .then(({ data }) => { setSchools(data ?? []); setLoadingSchools(false); });
+    const query = suburbId
+      ? supabase.from('schools').select('id, name, type, suburb_name, city_name').eq('suburb_id', suburbId).eq('is_active', true).order('name')
+      : supabase.from('schools').select('id, name, type, suburb_name, city_name').eq('city_id', cityId).eq('is_active', true).order('name').limit(100);
+    query.then(({ data }) => { setSchools(data ?? []); setLoadingSchools(false); });
     setSelectedSchool(null); setSchoolSearch('');
     setExpandedPanel('school');
-  }, [suburbId]);
+  }, [suburbId, cityId]);
+
+  // Debounced global school search — searches all 25k+ SA schools as user types
+  useEffect(() => {
+    if (schoolSearch.trim().length < 2) { setGlobalSchools([]); return; }
+    const timer = setTimeout(async () => {
+      setSearchingSchools(true);
+      try {
+        const res = await fetch(`${WEB_API_BASE}/api/locations/schools/search?q=${encodeURIComponent(schoolSearch.trim())}&limit=20`);
+        const data = await res.json();
+        setGlobalSchools(Array.isArray(data) ? data as SchoolOption[] : []);
+      } catch { setGlobalSchools([]); }
+      finally { setSearchingSchools(false); }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [schoolSearch]);
 
   const handleDetectLocation = async () => {
     setDetectingLocation(true);
@@ -155,48 +171,33 @@ export default function OnboardingScreen() {
     }
   };
 
-  const getAge = (d: string) => {
-    const birth = new Date(d), today = new Date();
-    let age = today.getFullYear() - birth.getFullYear();
-    if (today.getMonth() < birth.getMonth() ||
-      (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
-    return age;
-  };
-
-  const filteredSchools = schools.filter(s =>
-    s.name.toLowerCase().includes(schoolSearch.toLowerCase())
-  );
+  const isGlobalSearch  = schoolSearch.trim().length >= 2;
+  const filteredSchools = isGlobalSearch ? globalSchools : schools;
 
   const locationComplete = !!(province && cityId && suburbId);
 
   const handleFinish = async () => {
     if (!locationComplete) { Alert.alert('Required', 'Please select your province, city, and suburb.'); return; }
-    if (!dob) { Alert.alert('Missing', 'Please enter your date of birth.'); return; }
-    const isAdult = getAge(dob) >= 18;
     setSaving(true);
 
     const { error } = await supabase.from('profiles').upsert({
       id: userId,
       email: userEmail,
       full_name: fullName,
-      date_of_birth: dob,
-      // RULE: users must be 18+ before transacting — under 18s get browse_only role
-      is_age_verified: isAdult,
-      role: isAdult ? 'buyer' : 'browse_only',
+      date_of_birth: dob || null,
+      role: 'buyer',
 
-      // Location cascade
       province,
       city_id: cityId,
       city_name: cityName,
       suburb_id: suburbId,
       suburb_name: suburbName,
 
-      // School (optional at signup)
       school_id: selectedSchool?.id ?? null,
       school_name: selectedSchool?.name ?? null,
       school_ids: selectedSchool ? [selectedSchool.id] : [],
 
-      // RULE: gates all buying and listing
+      // RULE: profile_completed_at gates all buying and listing
       profile_completed_at: new Date().toISOString(),
     });
 
@@ -229,22 +230,18 @@ export default function OnboardingScreen() {
           </TouchableOpacity>
         </>}
 
-        {/* ── Step 2: Age verification ──────────────────────── */}
+        {/* ── Step 2: Date of birth (optional) ─────────────── */}
         {step === 2 && <>
-          <Text style={styles.title}>Verify your age</Text>
-          {/* RULE: users must be 18+ before transacting */}
-          <Text style={styles.subtitle}>You must be 18+ to buy or sell. Under 18s can browse only.</Text>
+          <Text style={styles.title}>Date of birth</Text>
+          <Text style={styles.subtitle}>Optional — helps us personalise your experience.</Text>
           <Text style={styles.label}>Date of Birth (YYYY-MM-DD)</Text>
           <TextInput style={styles.input} value={dob} onChangeText={setDob}
             placeholder="1990-06-15" placeholderTextColor="#979797" keyboardType="numbers-and-punctuation" />
-          <View style={styles.infoBox}>
-            <Text style={styles.infoText}>🔒 Used only for age verification and stored securely.</Text>
-          </View>
           <View style={styles.rowBtns}>
             <TouchableOpacity style={[styles.btn, styles.btnOutline, { flex: 1 }]} onPress={() => setStep(1)}>
               <Text style={styles.btnOutlineText}>← Back</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, !dob && styles.btnDisabled, { flex: 2 }]} onPress={() => setStep(3)} disabled={!dob}>
+            <TouchableOpacity style={[styles.btn, { flex: 2 }]} onPress={() => setStep(3)}>
               <Text style={styles.btnText}>Continue →</Text>
             </TouchableOpacity>
           </View>
@@ -333,53 +330,54 @@ export default function OnboardingScreen() {
             </>
           )}
 
-          {/* School picker */}
-          {suburbId && (
-            <>
-              <Text style={[styles.label, { marginTop: 10 }]}>
-                School <Text style={{ color: '#979797', fontWeight: '400' }}>(optional)</Text>
-              </Text>
-              <TextInput style={[styles.input, { marginBottom: 6 }]}
-                value={schoolSearch} onChangeText={setSchoolSearch}
-                placeholder="Search school name..." placeholderTextColor="#979797" />
+          {/* School picker — shown once city is selected; narrows when suburb is also chosen */}
+          {/* School — always visible, global search works without location */}
+          <>
+            <Text style={[styles.label, { marginTop: 10 }]}>
+              School <Text style={{ color: '#979797', fontWeight: '400' }}>(optional)</Text>
+            </Text>
+            <TextInput
+              style={[styles.input, { marginBottom: 6 }]}
+              value={schoolSearch}
+              onChangeText={text => { setSchoolSearch(text); if (text.length > 0) setExpandedPanel('school'); }}
+              placeholder="Search any school in South Africa..."
+              placeholderTextColor="#979797"
+            />
 
-              {expandedPanel === 'school' && (
-                <View style={styles.dropList}>
-                  {loadingSchools
-                    ? <ActivityIndicator color={BLUE} style={{ padding: 12 }} />
-                    : filteredSchools.length === 0
-                      ? <Text style={styles.emptyText}>
-                          {schools.length === 0 ? 'No schools in this suburb yet.' : 'No match.'}
-                        </Text>
-                      : filteredSchools.map(school => {
-                        const sel = selectedSchool?.id === school.id;
-                        return (
-                          <TouchableOpacity key={school.id}
-                            style={[styles.dropRow, sel && styles.dropRowActive]}
-                            onPress={() => { setSelectedSchool(sel ? null : school); setExpandedPanel(null); }}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={[styles.dropText, sel && styles.dropTextActive]}>{school.name}</Text>
-                              <Text style={styles.dropSub}>{school.city_name} · {school.type}</Text>
-                            </View>
-                            {sel && <Text style={{ color: BLUE }}>✓</Text>}
-                          </TouchableOpacity>
-                        );
-                      })
-                  }
-                </View>
-              )}
+            {expandedPanel === 'school' && (
+              <View style={styles.dropList}>
+                {(loadingSchools || searchingSchools)
+                  ? <ActivityIndicator color={BLUE} style={{ padding: 12 }} />
+                  : filteredSchools.length === 0
+                    ? <Text style={styles.emptyText}>
+                        {isGlobalSearch ? 'No schools found — try a different name.' : 'Type to search all SA schools.'}
+                      </Text>
+                    : filteredSchools.map(school => {
+                      const sel = selectedSchool?.id === school.id;
+                      const location = [school.suburb_name, school.city_name].filter(Boolean).join(' · ');
+                      return (
+                        <TouchableOpacity key={school.id}
+                          style={[styles.dropRow, sel && styles.dropRowActive]}
+                          onPress={() => { setSelectedSchool(sel ? null : school); setExpandedPanel(null); setSchoolSearch(''); }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.dropText, sel && styles.dropTextActive]}>{school.name}</Text>
+                            <Text style={styles.dropSub}>{location} · {school.type}</Text>
+                          </View>
+                          {sel && <Text style={{ color: BLUE }}>✓</Text>}
+                        </TouchableOpacity>
+                      );
+                    })
+                }
+              </View>
+            )}
 
-              {/* Show list inline if not expanded */}
-              {expandedPanel !== 'school' && (
-                <TouchableOpacity onPress={() => setExpandedPanel('school')} style={[styles.pickerBtn, selectedSchool && styles.pickerBtnSelected]}>
-                  <Text style={[styles.pickerBtnText, selectedSchool && styles.pickerBtnTextSelected]}>
-                    {selectedSchool ? selectedSchool.name : 'Select a school...'}
-                  </Text>
-                  <Text style={{ color: '#aaa' }}>▾</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          )}
+            {expandedPanel !== 'school' && !selectedSchool && (
+              <TouchableOpacity onPress={() => setExpandedPanel('school')} style={styles.pickerBtn}>
+                <Text style={styles.pickerBtnText}>Select a school...</Text>
+                <Text style={{ color: '#aaa' }}>▾</Text>
+              </TouchableOpacity>
+            )}
+          </>
 
           {/* Selected school badge */}
           {selectedSchool && (

@@ -1,0 +1,149 @@
+import { useState, useEffect } from 'react';
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { supabase } from '@/src/lib/supabase';
+import { Lock, CheckCircle2 } from 'lucide-react-native';
+
+const CRIMSON = '#BE1E2D';
+const BORDER  = '#dedede';
+const SURFACE = '#f4f4f4';
+
+export default function ResetPasswordScreen() {
+  const router  = useRouter();
+  const [password, setPassword]   = useState('');
+  const [confirm, setConfirm]     = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [ready, setReady]         = useState(false);
+  const [done, setDone]           = useState(false);
+
+  useEffect(() => {
+    // Check if a valid recovery session exists
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setReady(true);
+      else {
+        Alert.alert(
+          'Link expired',
+          'This reset link is invalid or has expired. Please request a new one.',
+          [{ text: 'OK', onPress: () => router.replace('/' as never) }]
+        );
+      }
+    });
+  }, []);
+
+  const handleReset = async () => {
+    if (password.length < 8) {
+      Alert.alert('Too short', 'Password must be at least 8 characters.'); return;
+    }
+    if (password !== confirm) {
+      Alert.alert('No match', 'Passwords do not match.'); return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) {
+      Alert.alert('Error', error.message); return;
+    }
+    setDone(true);
+  };
+
+  if (done) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.successCard}>
+          <CheckCircle2 size={56} strokeWidth={1.5} color="#16a34a" />
+          <Text style={styles.successTitle}>Password updated!</Text>
+          <Text style={styles.successText}>You can now sign in with your new password.</Text>
+          <TouchableOpacity style={styles.btn} onPress={() => router.replace('/' as never)}>
+            <Text style={styles.btnText}>Go to Sign In</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (!ready) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator color={CRIMSON} size="large" />
+        <Text style={{ color: '#979797', marginTop: 12 }}>Verifying your link…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      {/* Brand */}
+      <View style={styles.brand}>
+        <Text style={styles.brandNext}>NEXT</Text>
+        <Text style={styles.brandKid}>KID</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Lock size={28} strokeWidth={1.5} color={CRIMSON} style={{ marginBottom: 12 }} />
+        <Text style={styles.title}>Choose a new password</Text>
+        <Text style={styles.subtitle}>Must be at least 8 characters.</Text>
+
+        <Text style={styles.label}>New password</Text>
+        <TextInput
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+          placeholder="••••••••"
+          placeholderTextColor="#979797"
+          secureTextEntry
+        />
+
+        <Text style={styles.label}>Confirm password</Text>
+        <TextInput
+          style={styles.input}
+          value={confirm}
+          onChangeText={setConfirm}
+          placeholder="••••••••"
+          placeholderTextColor="#979797"
+          secureTextEntry
+        />
+
+        <TouchableOpacity
+          style={[styles.btn, loading && styles.btnDisabled]}
+          onPress={handleReset}
+          disabled={loading}
+        >
+          {loading
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.btnText}>Set New Password</Text>
+          }
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.backLink} onPress={() => router.replace('/' as never)}>
+          <Text style={styles.backLinkText}>Back to Sign In</Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: SURFACE, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  brand:        { flexDirection: 'row', marginBottom: 24 },
+  brandNext:    { fontSize: 36, fontWeight: '900', color: '#3A3A3A', letterSpacing: 1 },
+  brandKid:     { fontSize: 36, fontWeight: '900', color: CRIMSON, letterSpacing: 1 },
+  card:         { backgroundColor: '#fff', borderRadius: 20, padding: 28, width: '100%', borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
+  title:        { color: '#111', fontSize: 22, fontWeight: '700', marginBottom: 4, textAlign: 'center' },
+  subtitle:     { color: '#979797', fontSize: 13, marginBottom: 24, textAlign: 'center' },
+  label:        { color: '#111', fontSize: 13, fontWeight: '500', marginBottom: 6, alignSelf: 'flex-start' },
+  input:        { width: '100%', backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, color: '#111', fontSize: 15, marginBottom: 14 },
+  btn:          { width: '100%', backgroundColor: CRIMSON, borderRadius: 30, padding: 15, alignItems: 'center', marginTop: 4 },
+  btnDisabled:  { backgroundColor: '#dedede' },
+  btnText:      { color: '#fff', fontWeight: '700', fontSize: 16 },
+  backLink:     { marginTop: 16 },
+  backLinkText: { color: CRIMSON, fontSize: 13, fontWeight: '600' },
+  successCard:  { alignItems: 'center', gap: 12, padding: 32 },
+  successTitle: { color: '#111', fontSize: 24, fontWeight: '800' },
+  successText:  { color: '#979797', fontSize: 14, textAlign: 'center', maxWidth: 240 },
+});

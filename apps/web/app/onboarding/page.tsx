@@ -7,7 +7,7 @@ import { SA_PROVINCES } from '@nextkid/shared'
 
 interface CityOption   { id: string; name: string }
 interface SuburbOption { id: string; name: string; postal_code?: string }
-interface SchoolOption { id: string; name: string; type: string; city_name: string }
+interface SchoolOption { id: string; name: string; type: string; suburb_name?: string; city_name: string; province_code?: string }
 interface SuburbSearchResult { id: string; name: string; city_id: string; city_name: string; province_code: string; postal_code?: string }
 
 // ── Design tokens (match globals.css) ────────────────────────────────────────
@@ -60,22 +60,28 @@ export default function OnboardingPage() {
 
   // Step 3 — location cascade
   const [province, setProvince]     = useState('')
-  const [cities, setCities]         = useState<CityOption[]>([])
   const [cityId, setCityId]         = useState('')
   const [cityName, setCityName]     = useState('')
-  const [suburbs, setSuburbs]       = useState<SuburbOption[]>([])
+
+  // City search
+  const [cityQuery, setCityQuery]         = useState('')
+  const [cityResults, setCityResults]     = useState<(CityOption & { province_code: string })[]>([])
+  const [searchingCities, setSearchingCities] = useState(false)
+  const [cityInputFocused, setCityInputFocused] = useState(false)
   const [suburbId, setSuburbId]     = useState('')
   const [suburbName, setSuburbName] = useState('')
-  const [schools, setSchools]       = useState<SchoolOption[]>([])
-  const [schoolSearch, setSchoolSearch] = useState('')
+  const [suburbs, setSuburbs]       = useState<SuburbOption[]>([])
+  const [loadingSuburbs, setLoadingSuburbs] = useState(false)
+  const [schools, setSchools]             = useState<SchoolOption[]>([])
+  const [schoolSearch, setSchoolSearch]   = useState('')
+  const [globalSchools, setGlobalSchools] = useState<SchoolOption[]>([])
+  const [searchingSchools, setSearchingSchools] = useState(false)
   const [selectedSchools, setSelectedSchools] = useState<SchoolOption[]>([])
 
   // Step 4 — delivery address (needed for D2D shipping)
   const [streetAddress, setStreetAddress]       = useState('')
   const [deliveryPostalCode, setDeliveryPostalCode] = useState('')
 
-  const [loadingCities, setLoadingCities]   = useState(false)
-  const [loadingSuburbs, setLoadingSuburbs] = useState(false)
   const [loadingSchools, setLoadingSchools] = useState(false)
   const [fetchError, setFetchError]         = useState('')
 
@@ -85,8 +91,7 @@ export default function OnboardingPage() {
   const [searchingSuburbs, setSearchingSuburbs] = useState(false)
 
   // Refs to suppress cascade resets when quick-search auto-fills all values
-  const skipProvinceRef = useRef('')
-  const skipCityRef     = useRef('')
+  const skipCityRef = useRef('')
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -98,43 +103,79 @@ export default function OnboardingPage() {
     })
   }, [router])
 
-  useEffect(() => {
-    if (!province) { setCities([]); setCityId(''); setCityName(''); return }
-    // Skip cascade reset when quick-search already pre-filled city/suburb
-    if (skipProvinceRef.current === province) { skipProvinceRef.current = ''; return }
-    setFetchError(''); setLoadingCities(true)
-    fetch(`/api/locations/cities?province=${encodeURIComponent(province)}`)
-      .then(r => r.json())
-      .then(data => { Array.isArray(data) ? setCities(data) : setFetchError(`Cities: ${data.error ?? 'unknown error'}`); setLoadingCities(false) })
-      .catch(e => { setFetchError(`Cities failed: ${e.message}`); setLoadingCities(false) })
-    setCityId(''); setCityName(''); setSuburbs([]); setSuburbId(''); setSuburbName('')
-    setSchools([]); setSelectedSchools([]); setSchoolSearch('')
-  }, [province])
 
+  // Load suburbs whenever city changes
   useEffect(() => {
     if (!cityId) { setSuburbs([]); setSuburbId(''); setSuburbName(''); return }
-    // Skip cascade reset when quick-search already pre-filled suburb
-    if (skipCityRef.current === cityId) { skipCityRef.current = ''; return }
-    setFetchError(''); setLoadingSuburbs(true)
-    fetch(`/api/locations/suburbs?cityId=${encodeURIComponent(cityId)}`)
+    setSuburbId(''); setSuburbName('')
+    setSchools([]); setSelectedSchools([]); setSchoolSearch('')
+    setLoadingSuburbs(true)
+    const params = new URLSearchParams({ cityId })
+    if (cityName) params.set('cityName', cityName)
+    fetch(`/api/locations/suburbs?${params}`)
       .then(r => r.json())
-      .then(data => { Array.isArray(data) ? setSuburbs(data) : setFetchError(`Suburbs: ${data.error ?? 'unknown error'}`); setLoadingSuburbs(false) })
-      .catch(e => { setFetchError(`Suburbs failed: ${e.message}`); setLoadingSuburbs(false) })
-    setSuburbId(''); setSuburbName(''); setSchools([]); setSelectedSchools([]); setSchoolSearch('')
-  }, [cityId])
+      .then(data => { setSuburbs(Array.isArray(data) ? data : []); setLoadingSuburbs(false) })
+      .catch(() => setLoadingSuburbs(false))
+  }, [cityId, cityName])
 
   useEffect(() => {
-    if (!suburbId) { setSchools([]); setSelectedSchools([]); return }
+    if (!suburbId && !cityId) { setSchools([]); setSelectedSchools([]); return }
     setFetchError(''); setLoadingSchools(true)
-    fetch(`/api/locations/schools?suburbId=${encodeURIComponent(suburbId)}`)
+    const params = new URLSearchParams()
+    if (suburbId)   params.set('suburbId',   suburbId)
+    if (suburbName) params.set('suburbName', suburbName)
+    if (cityId)     params.set('cityId',     cityId)
+    if (cityName)   params.set('cityName',   cityName)
+    fetch(`/api/locations/schools?${params}`)
       .then(r => r.json())
       .then(data => { Array.isArray(data) ? setSchools(data) : setFetchError(`Schools: ${data.error ?? 'unknown error'}`); setLoadingSchools(false) })
       .catch(e => { setFetchError(`Schools failed: ${e.message}`); setLoadingSchools(false) })
     setSchoolSearch('')
-  }, [suburbId])
+  }, [suburbId, cityId, suburbName, cityName])
 
+
+  // Debounced city search — starts after 2 letters, searches all SA cities
+  useEffect(() => {
+    if (cityQuery.trim().length < 2) { setCityResults([]); return }
+    const timer = setTimeout(async () => {
+      setSearchingCities(true)
+      try {
+        const params = new URLSearchParams({ q: cityQuery.trim() })
+        if (province) params.set('province', province)
+        const res = await fetch(`/api/locations/cities/search?${params}`)
+        const data = await res.json()
+        setCityResults(Array.isArray(data) ? data : [])
+      } catch { setCityResults([]) }
+      finally { setSearchingCities(false) }
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [cityQuery])
+
+  const handleCitySelect = (city: CityOption & { province_code: string }) => {
+    setCityId(city.id)
+    setCityName(city.name)
+    setCityQuery(city.name)
+    setCityResults([])
+    setCityInputFocused(false)
+    setProvince(city.province_code)
+  }
 
   const handleSchoolSearch = useCallback((q: string) => setSchoolSearch(q), [])
+
+  // Debounced global school search — runs on every keystroke regardless of location
+  useEffect(() => {
+    if (schoolSearch.trim().length < 2) { setGlobalSchools([]); return }
+    const timer = setTimeout(async () => {
+      setSearchingSchools(true)
+      try {
+        const res = await fetch(`/api/locations/schools/search?q=${encodeURIComponent(schoolSearch.trim())}&limit=20`)
+        const data = await res.json()
+        setGlobalSchools(Array.isArray(data) ? data : [])
+      } catch { setGlobalSchools([]) }
+      finally { setSearchingSchools(false) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [schoolSearch])
 
   // Debounced suburb search
   useEffect(() => {
@@ -154,20 +195,12 @@ export default function OnboardingPage() {
   // Called when user picks a suburb from the quick-search results
   const applySuburbResult = async (r: SuburbSearchResult) => {
     setSearchingSuburbs(true)
-    // Pre-fetch dropdown lists so the manual cascade pickers show correctly
-    const [citiesRes, suburbsRes] = await Promise.all([
-      fetch(`/api/locations/cities?province=${encodeURIComponent(r.province_code)}`).then(x => x.json()),
-      fetch(`/api/locations/suburbs?cityId=${encodeURIComponent(r.city_id)}`).then(x => x.json()),
-    ])
     setSearchingSuburbs(false)
-    // Set refs BEFORE state so the cascade useEffects see them and skip their resets
-    skipProvinceRef.current = r.province_code
-    skipCityRef.current     = r.city_id
-    setCities(Array.isArray(citiesRes) ? citiesRes : [])
-    setSuburbs(Array.isArray(suburbsRes) ? suburbsRes : [])
+    skipCityRef.current = r.city_id
     setProvince(r.province_code)
     setCityId(r.city_id)
     setCityName(r.city_name)
+    setCityQuery(r.city_name)
     setSuburbId(r.id)
     setSuburbName(r.name)
     if (r.postal_code) setDeliveryPostalCode(r.postal_code)
@@ -175,9 +208,12 @@ export default function OnboardingPage() {
     setSuburbResults([])
   }
 
-  const filteredSchools = schools.filter(s =>
-    s.name.toLowerCase().includes(schoolSearch.toLowerCase())
-  )
+  const isGlobalSearch = schoolSearch.trim().length >= 2 && globalSchools.length > 0
+  const filteredSchools = isGlobalSearch
+    ? globalSchools
+    : schoolSearch.trim().length > 0
+      ? schools.filter(s => s.name.toLowerCase().includes(schoolSearch.toLowerCase()))
+      : schools
 
   const locationComplete = !!(province && cityId && suburbId)
 
@@ -303,27 +339,65 @@ export default function OnboardingPage() {
 
             {/* Province */}
             <label style={s.label}>Province</label>
-            <select style={{ ...s.select, marginBottom: '12px' }} value={province} onChange={e => setProvince(e.target.value)}>
+            <select
+              style={{ ...s.select, marginBottom: '12px' }}
+              value={province}
+              onChange={e => {
+                setProvince(e.target.value);
+                setCityQuery(''); setCityId(''); setCityName('');
+                setSuburbId(''); setSuburbName(''); setSuburbs([]);
+                setSchools([]); setSelectedSchools([]); setSchoolSearch('');
+              }}
+            >
               <option value="">Select a province...</option>
               {SA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
 
-            {/* City */}
-            <label style={{ ...s.label, color: province ? MUTED : BORDER }}>City</label>
-            <select
-              style={{ ...(province ? s.select : s.selectDisabled), marginBottom: '12px' }}
-              disabled={!province || loadingCities}
-              value={cityId}
-              onChange={e => {
-                const opt = cities.find(c => c.id === e.target.value)
-                setCityId(e.target.value); setCityName(opt?.name ?? '')
-              }}
-            >
-              <option value="">{loadingCities ? 'Loading...' : 'Select a city...'}</option>
-              {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            {/* City search — type 2 letters to see matching cities */}
+            <label style={s.label}>City</label>
+            <div style={{ position: 'relative', marginBottom: '12px' }}>
+              <input
+                style={{ ...s.input, marginBottom: 0, borderColor: cityId ? BLUE : BORDER }}
+                value={cityQuery}
+                onChange={e => {
+                  setCityQuery(e.target.value)
+                  if (e.target.value !== cityName) {
+                    setCityId(''); setCityName('')
+                    setSuburbs([]); setSuburbId(''); setSuburbName('')
+                  }
+                }}
+                onFocus={() => setCityInputFocused(true)}
+                onBlur={() => setTimeout(() => setCityInputFocused(false), 150)}
+                placeholder="Type 2 letters to search city (e.g. Jo, Ca, Pre...)"
+                autoComplete="off"
+              />
+              {searchingCities && (
+                <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: MUTED, fontSize: '12px' }}>...</span>
+              )}
+              {cityId && (
+                <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: BLUE, fontSize: '13px', fontWeight: 700 }}>✓</span>
+              )}
+              {/* City results dropdown */}
+              {cityResults.length > 0 && cityInputFocused && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, background: '#fff', border: `1px solid ${BORDER}`, borderRadius: '10px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '4px', overflow: 'hidden' }}>
+                  {cityResults.map(city => (
+                    <div
+                      key={city.id}
+                      onMouseDown={() => handleCitySelect(city)}
+                      style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: `1px solid ${BORDER}`, background: cityId === city.id ? '#fde8ea' : '#fff' }}
+                    >
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: '13px', color: cityId === city.id ? BLUE : TEXT }}>{city.name}</p>
+                      <p style={{ margin: 0, fontSize: '11px', color: MUTED }}>{city.province_code}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {cityQuery.length >= 2 && !searchingCities && cityResults.length === 0 && !cityId && (
+              <p style={{ color: MUTED, fontSize: '12px', marginBottom: '8px' }}>No cities found — try a different name</p>
+            )}
 
-            {/* Suburb */}
+            {/* Suburb search */}
             <label style={{ ...s.label, color: cityId ? MUTED : BORDER }}>Suburb</label>
             <select
               style={{ ...(cityId ? s.select : s.selectDisabled), marginBottom: '16px' }}
@@ -333,35 +407,56 @@ export default function OnboardingPage() {
                 const opt = suburbs.find(s => s.id === e.target.value)
                 setSuburbId(e.target.value)
                 setSuburbName(opt?.name ?? '')
-                if (opt?.postal_code) setDeliveryPostalCode(opt.postal_code)
+                if ((opt as SuburbOption & { postal_code?: string })?.postal_code) {
+                  setDeliveryPostalCode((opt as SuburbOption & { postal_code?: string }).postal_code!)
+                }
               }}
             >
-              <option value="">{loadingSuburbs ? 'Loading...' : 'Select a suburb...'}</option>
+              <option value="">
+                {!cityId ? 'Select a city first' : loadingSuburbs ? 'Loading suburbs...' : suburbs.length === 0 ? 'No suburbs found' : 'Select a suburb...'}
+              </option>
               {suburbs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
 
-            {/* School */}
-            {suburbId && <>
+            {/* School — auto-loads for selected suburb, allows filtering + global search */}
+            {true && <>
               <label style={s.label}>
-                School <span style={{ color: BORDER, fontWeight: 400 }}>(optional — add now or later)</span>
+                School{' '}
+                <span style={{ color: BORDER, fontWeight: 400 }}>(optional — add now or later)</span>
               </label>
+
+              {/* Context label */}
+              {suburbId && schools.length > 0 && !isGlobalSearch && (
+                <p style={{ color: BLUE, fontSize: '12px', fontWeight: 600, marginBottom: '6px', margin: '0 0 6px' }}>
+                  📍 {schools.length} school{schools.length !== 1 ? 's' : ''} near {suburbName || cityName}
+                </p>
+              )}
+
               <input
                 style={{ ...s.input, marginBottom: '8px' }}
                 value={schoolSearch}
                 onChange={e => handleSchoolSearch(e.target.value)}
-                placeholder="Search school name..."
-                disabled={loadingSchools}
+                placeholder={suburbId && schools.length > 0
+                  ? `Filter ${schools.length} schools near ${suburbName || cityName}...`
+                  : 'Search any school in South Africa...'}
               />
 
-              <div style={{ maxHeight: '180px', overflowY: 'auto', border: `1px solid ${BORDER}`, borderRadius: '10px', marginBottom: '10px', background: '#fff' }}>
-                {loadingSchools
-                  ? <p style={{ color: MUTED, padding: '14px', textAlign: 'center', margin: 0, fontSize: '13px' }}>Loading...</p>
+              <div style={{ maxHeight: '220px', overflowY: 'auto', border: `1px solid ${BORDER}`, borderRadius: '10px', marginBottom: '10px', background: '#fff' }}>
+                {(loadingSchools || searchingSchools)
+                  ? <p style={{ color: MUTED, padding: '14px', textAlign: 'center', margin: 0, fontSize: '13px' }}>
+                      {loadingSchools ? `Loading schools near ${suburbName || cityName}...` : 'Searching...'}
+                    </p>
                   : filteredSchools.length === 0
                     ? <p style={{ color: MUTED, padding: '14px', textAlign: 'center', margin: 0, fontSize: '13px' }}>
-                        {schools.length === 0 ? 'No schools in this suburb yet.' : 'No match — try a different search.'}
+                        {schoolSearch.trim().length >= 2
+                          ? 'No schools found — try a different name.'
+                          : suburbId
+                            ? `No schools found near ${suburbName}. Type to search all SA schools.`
+                            : 'Select a suburb to see nearby schools, or type to search.'}
                       </p>
                     : filteredSchools.map(school => {
                       const selected = selectedSchools.some(s => s.id === school.id)
+                      const location = [school.suburb_name, school.city_name].filter(Boolean).join(' · ')
                       return (
                         <div key={school.id} onClick={() => {
                           setSelectedSchools(prev =>
@@ -371,12 +466,12 @@ export default function OnboardingPage() {
                           style={{
                             padding: '11px 14px', cursor: 'pointer',
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            background: selected ? '#eef0ff' : '#fff',
+                            background: selected ? '#fde8ea' : '#fff',
                             borderBottom: `1px solid ${BORDER}`,
                           }}>
                           <div>
                             <p style={{ color: selected ? BLUE : TEXT, margin: 0, fontSize: '13px', fontWeight: 600 }}>{school.name}</p>
-                            <p style={{ color: MUTED, margin: 0, fontSize: '11px' }}>{school.city_name} · {school.type}</p>
+                            {location && <p style={{ color: MUTED, margin: 0, fontSize: '11px' }}>{location}</p>}
                           </div>
                           {selected && <span style={{ color: BLUE, fontSize: '16px', fontWeight: '700' }}>✓</span>}
                         </div>
@@ -385,10 +480,9 @@ export default function OnboardingPage() {
                 }
               </div>
 
-              {schools.length > 0 && selectedSchools.length === 0 && (
+              {isGlobalSearch && (
                 <p style={{ color: MUTED, fontSize: '12px', marginBottom: '10px' }}>
-                  Can't find your school?{' '}
-                  <span style={{ color: BLUE, cursor: 'pointer', fontWeight: '600' }}>Request it to be added</span>
+                  Showing results from all SA schools
                 </p>
               )}
             </>}

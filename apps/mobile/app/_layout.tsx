@@ -1,8 +1,10 @@
+import React from "react";
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { supabase } from '@/src/lib/supabase';
+import { registerForPushNotifications } from '@/src/lib/pushNotifications';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -21,6 +23,10 @@ export default function RootLayout() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      // Register push token whenever user signs in
+      if (session?.user) {
+        registerForPushNotifications().catch(() => {});
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -35,14 +41,18 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="auth/reset-password" />
+        <Stack.Screen name="order/[id]" />
+        <Stack.Screen name="checkout/[listingId]" />
+        <Stack.Screen name="cart" />
         <Stack.Screen
           name="item/[id]"
           options={{
             headerShown: true,
             headerTitle: '',
             headerBackTitle: 'Back',
-            headerStyle: { backgroundColor: '#0a0a0a' },
-            headerTintColor: '#fff',
+            headerStyle: { backgroundColor: '#ffffff' },
+            headerTintColor: '#BE1E2D',
           }}
         />
       </Stack>

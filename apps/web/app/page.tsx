@@ -8,6 +8,7 @@ import { School, Lock, Package, Users } from 'lucide-react'
 export default function LoginPage() {
   const router = useRouter()
   const [isLogin, setIsLogin] = useState(true)
+  const [isForgotPassword, setIsForgotPassword] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -33,7 +34,13 @@ export default function LoginPage() {
     setError('')
     setMessage('')
     setLoading(true)
-    if (isLogin) {
+    if (isForgotPassword) {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      })
+      if (error) setError(error.message)
+      else setMessage('Check your email for a password reset link.')
+    } else if (isLogin) {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setError(error.message)
       else await redirectAfterLogin()
@@ -54,8 +61,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div>
           <div className="leading-none mb-2">
-            <span style={{ fontFamily: 'var(--font-bebas, Impact, "Arial Black", sans-serif)', fontSize: '4rem', letterSpacing: '0.04em', color: '#ffffff' }}>NEXT</span>
-            <span style={{ fontFamily: 'var(--font-bebas, Impact, "Arial Black", sans-serif)', fontSize: '4rem', letterSpacing: '0.04em', color: '#BE1E2D' }}>KID</span>
+            <img src="/logo.svg" alt="NextKid" style={{ height: '72px', width: 'auto' }} />
           </div>
           <p style={{ letterSpacing: '0.22em', fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', fontWeight: 500, textTransform: 'uppercase', marginBottom: '28px' }}>
             Wear.&nbsp; Grow.&nbsp; Repeat.
@@ -107,10 +113,12 @@ export default function LoginPage() {
           </div>
 
           <h1 className="text-2xl font-bold text-[#111] mb-1">
-            {isLogin ? 'Welcome back' : 'Create account'}
+            {isForgotPassword ? 'Reset password' : isLogin ? 'Welcome back' : 'Create account'}
           </h1>
           <p className="text-[#979797] text-sm mb-8">
-            {isLogin ? 'Sign in to your account' : 'Join the NextKid community'}
+            {isForgotPassword
+              ? "Enter your email and we'll send you a reset link"
+              : isLogin ? 'Sign in to your account' : 'Join the NextKid community'}
           </p>
 
           <div className="mb-4">
@@ -125,17 +133,33 @@ export default function LoginPage() {
             />
           </div>
 
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-[#111] mb-1.5">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-              className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-3 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#BE1E2D]/20 focus:border-[#BE1E2D] transition"
-            />
-          </div>
+          {!isForgotPassword && (
+            <div className="mb-2">
+              <label className="block text-sm font-medium text-[#111] mb-1.5">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+                className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-3 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#BE1E2D]/20 focus:border-[#BE1E2D] transition"
+              />
+            </div>
+          )}
+
+          {isLogin && !isForgotPassword && (
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => { setIsForgotPassword(true); setError(''); setMessage('') }}
+                className="text-[#BE1E2D] text-xs font-medium hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
+
+          {!isLogin && !isForgotPassword && <div className="mb-4" />}
+          {isForgotPassword && <div className="mb-4" />}
 
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
           {message && <p className="text-green-600 text-sm mb-4">{message}</p>}
@@ -145,17 +169,31 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full py-3 rounded-full bg-[#BE1E2D] text-white font-semibold text-sm hover:bg-[#9B1824] disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
-            {loading ? 'Please wait…' : isLogin ? 'Sign In' : 'Create Account'}
+            {loading ? 'Please wait…' : isForgotPassword ? 'Send Reset Link' : isLogin ? 'Sign In' : 'Create Account'}
           </button>
 
           <p className="text-[#979797] text-sm text-center mt-6">
-            {isLogin ? "Don't have an account? " : 'Already have an account? '}
-            <button
-              onClick={() => { setIsLogin(!isLogin); setError(''); setMessage('') }}
-              className="text-[#BE1E2D] font-medium hover:underline"
-            >
-              {isLogin ? 'Sign up' : 'Sign in'}
-            </button>
+            {isForgotPassword ? (
+              <>
+                Remember your password?{' '}
+                <button
+                  onClick={() => { setIsForgotPassword(false); setError(''); setMessage('') }}
+                  className="text-[#BE1E2D] font-medium hover:underline"
+                >
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                <button
+                  onClick={() => { setIsLogin(!isLogin); setError(''); setMessage('') }}
+                  className="text-[#BE1E2D] font-medium hover:underline"
+                >
+                  {isLogin ? 'Sign up' : 'Sign in'}
+                </button>
+              </>
+            )}
           </p>
         </div>
       </div>

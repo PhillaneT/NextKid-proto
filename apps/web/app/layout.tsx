@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Roboto, Bebas_Neue } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
+import { CartProvider } from "@/lib/cart";
 
 const roboto = Roboto({
   weight: ['400', '500', '700'],
@@ -24,8 +25,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${roboto.variable} ${bebasNeue.variable} antialiased`}>
-        <Navbar />
-        {children}
+        <CartProvider>
+          <Navbar />
+          {children}
+        </CartProvider>
       </body>
     </html>
   );

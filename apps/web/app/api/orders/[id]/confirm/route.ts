@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { sendOrderNotification } from '@/lib/notifications'
 
 // Buyer confirms receipt of item → DELIVERED → COMPLETED
 // RULE: This triggers fund release to seller in production (Peach Payments capture).
@@ -73,6 +74,9 @@ export async function POST(
     note: 'Buyer confirmed receipt — funds released to seller',
     created_by: buyerId,
   })
+
+  sendOrderNotification({ orderId, newStatus: 'COMPLETED', triggeredBy: 'buyer' })
+    .catch(err => console.error('[Notifications] confirm route error:', err))
 
   return NextResponse.json({ success: true, newStatus: 'COMPLETED' })
 }

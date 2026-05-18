@@ -170,15 +170,15 @@ export default function DashboardPage() {
 
         {/* Category grid */}
         <section>
-          <h2 className="text-xl font-bold text-[#111] mb-6">Shop by category</h2>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+          <h2 className="text-xl font-bold text-[#111] mb-4">Shop by category</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
             {(ALL_CATEGORIES as readonly ListingCategory[]).map(cat => (
               <button
                 key={cat}
                 onClick={() => router.push(`/browse?category=${encodeURIComponent(cat)}`)}
-                className="flex flex-col items-center gap-2 p-4 bg-[#f4f4f4] rounded-2xl hover:bg-[#fde8ea] hover:text-[#BE1E2D] transition group text-center"
+                className="flex flex-col items-center gap-2 p-4 bg-[#f4f4f4] rounded-2xl hover:bg-[#fde8ea] hover:text-[#BE1E2D] transition group text-center shrink-0 min-w-[90px]"
               >
-                <span className="text-[#BE1E2D] group-hover:text-[#BE1E2D]">{CATEGORY_ICON[cat] ?? <Package size={26} strokeWidth={2} />}</span>
+                <span className="text-[#BE1E2D]">{CATEGORY_ICON[cat] ?? <Package size={26} strokeWidth={2} />}</span>
                 <span className="text-xs font-medium text-[#111] group-hover:text-[#BE1E2D] leading-tight">{cat}</span>
               </button>
             ))}

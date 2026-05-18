@@ -9,16 +9,25 @@ import { supabase } from '@/src/lib/supabase';
 export default function LoginScreen() {
   const router = useRouter();
   const [isLogin, setIsLogin] = useState(true);
+  const [isForgot, setIsForgot] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!email || !password) {
-      Alert.alert('Missing fields', 'Please enter your email and password.');
+    if (!email) { Alert.alert('Missing fields', 'Please enter your email.'); return; }
+    if (!isForgot && !password) { Alert.alert('Missing fields', 'Please enter your password.'); return; }
+    setLoading(true);
+
+    if (isForgot) {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'nextkid://auth/reset-password',
+      });
+      if (error) Alert.alert('Error', error.message);
+      else Alert.alert('Check your email', 'A password reset link has been sent. Tap it on this device to reset your password.');
+      setLoading(false);
       return;
     }
-    setLoading(true);
 
     if (isLogin) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -44,20 +53,33 @@ export default function LoginScreen() {
     setLoading(false);
   };
 
+  const reset = (mode: 'login' | 'signup' | 'forgot') => {
+    setIsForgot(mode === 'forgot');
+    setIsLogin(mode === 'login');
+    setEmail(''); setPassword('');
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* Coral top banner */}
+      {/* Charcoal top banner */}
       <View style={styles.topBanner}>
-        <Text style={styles.brand}>NextKid</Text>
-        <Text style={styles.tagline}>South Africa&apos;s school marketplace</Text>
+        <Text style={styles.brand}>
+          <Text style={{ color: '#ffffff' }}>NEXT</Text>
+          <Text style={{ color: CRIMSON }}>KID</Text>
+        </Text>
+        <Text style={styles.tagline}>South Africa's school marketplace</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.title}>{isLogin ? 'Welcome back' : 'Create account'}</Text>
-        <Text style={styles.subtitle}>{isLogin ? 'Sign in to your account' : 'Join the marketplace'}</Text>
+        <Text style={styles.title}>
+          {isForgot ? 'Reset password' : isLogin ? 'Welcome back' : 'Create account'}
+        </Text>
+        <Text style={styles.subtitle}>
+          {isForgot ? "Enter your email and we'll send a reset link" : isLogin ? 'Sign in to your account' : 'Join the marketplace'}
+        </Text>
 
         <Text style={styles.label}>Email</Text>
         <TextInput
@@ -71,15 +93,25 @@ export default function LoginScreen() {
           autoCorrect={false}
         />
 
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="••••••••"
-          placeholderTextColor="#979797"
-          secureTextEntry
-        />
+        {!isForgot && (
+          <>
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="••••••••"
+              placeholderTextColor="#979797"
+              secureTextEntry
+            />
+          </>
+        )}
+
+        {isLogin && !isForgot && (
+          <TouchableOpacity onPress={() => reset('forgot')} style={styles.forgotRow}>
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
@@ -88,14 +120,21 @@ export default function LoginScreen() {
         >
           {loading
             ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.buttonText}>{isLogin ? 'Sign In' : 'Create Account'}</Text>
+            : <Text style={styles.buttonText}>
+                {isForgot ? 'Send Reset Link' : isLogin ? 'Sign In' : 'Create Account'}
+              </Text>
           }
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={styles.switchRow}>
+        <TouchableOpacity
+          onPress={() => isForgot ? reset('login') : reset(isLogin ? 'signup' : 'login')}
+          style={styles.switchRow}
+        >
           <Text style={styles.switchText}>
-            {isLogin ? "Don't have an account? " : 'Already have an account? '}
-            <Text style={styles.switchLink}>{isLogin ? 'Sign up' : 'Sign in'}</Text>
+            {isForgot ? 'Remember your password? ' : isLogin ? "Don't have an account? " : 'Already have an account? '}
+            <Text style={styles.switchLink}>
+              {isForgot ? 'Sign in' : isLogin ? 'Sign up' : 'Sign in'}
+            </Text>
           </Text>
         </TouchableOpacity>
       </View>
@@ -103,14 +142,15 @@ export default function LoginScreen() {
   );
 }
 
-const CORAL = '#BE1E2D';
+const CRIMSON = '#BE1E2D';
+const CORAL   = CRIMSON;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f4f4' },
   topBanner: {
-    backgroundColor: CORAL, paddingHorizontal: 24, paddingTop: 64, paddingBottom: 32,
+    backgroundColor: '#3A3A3A', paddingHorizontal: 24, paddingTop: 64, paddingBottom: 32,
   },
-  brand: { color: '#fff', fontSize: 28, fontWeight: '800', marginBottom: 4 },
+  brand: { fontSize: 32, fontWeight: '800', marginBottom: 4, letterSpacing: 1 },
   tagline: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
   card: {
     backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -124,12 +164,14 @@ const styles = StyleSheet.create({
     borderRadius: 12, padding: 14, color: '#111', fontSize: 15, marginBottom: 14,
   },
   button: {
-    backgroundColor: CORAL, borderRadius: 30, padding: 16,
+    backgroundColor: CRIMSON, borderRadius: 30, padding: 16,
     alignItems: 'center', marginTop: 8,
   },
   buttonDisabled: { backgroundColor: '#dedede' },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   switchRow: { marginTop: 20, alignItems: 'center' },
   switchText: { color: '#979797', fontSize: 13 },
-  switchLink: { color: CORAL, fontWeight: '600' },
+  switchLink: { color: CRIMSON, fontWeight: '600' },
+  forgotRow: { alignItems: 'flex-end', marginTop: -6, marginBottom: 12 },
+  forgotText: { color: CRIMSON, fontSize: 12, fontWeight: '600' },
 });

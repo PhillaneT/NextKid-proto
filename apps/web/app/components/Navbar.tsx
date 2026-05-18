@@ -3,6 +3,8 @@
 import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useCart } from '@/lib/cart';
+import { ShoppingCart } from 'lucide-react';
 
 const AUTH_HIDDEN = ['/', '/onboarding'];
 
@@ -30,15 +32,15 @@ export default function Navbar() {
   };
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
+  const { count } = useCart();
 
   return (
     <header className="sticky top-0 z-50 bg-white border-b border-[#dedede]">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-6">
 
         {/* Logo */}
-        <a href="/dashboard" className="flex items-center shrink-0 leading-none">
-          <span style={{ fontFamily: 'var(--font-bebas, Impact, "Arial Black", sans-serif)', fontSize: '1.75rem', letterSpacing: '0.04em', color: '#3A3A3A' }}>NEXT</span>
-          <span style={{ fontFamily: 'var(--font-bebas, Impact, "Arial Black", sans-serif)', fontSize: '1.75rem', letterSpacing: '0.04em', color: '#BE1E2D' }}>KID</span>
+        <a href="/dashboard" className="shrink-0">
+          <img src="/logo.svg" alt="NextKid" height={44} style={{ height: '44px', width: 'auto' }} />
         </a>
 
         {/* Pill search bar */}
@@ -69,6 +71,21 @@ export default function Navbar() {
             <NavTab label="Profile" active={isActive('/profile')} onClick={() => router.push('/profile')} />
           )}
         </nav>
+
+        {/* Cart icon */}
+        {isLoggedIn && (
+          <button
+            onClick={() => router.push('/cart')}
+            className="relative shrink-0 p-2 text-[#979797] hover:text-[#BE1E2D] transition"
+          >
+            <ShoppingCart size={22} strokeWidth={2} />
+            {count > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-[#BE1E2D] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                {count > 9 ? '9+' : count}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Auth button */}
         {!isLoggedIn ? (

@@ -12,6 +12,7 @@ import {
   ALL_CATEGORIES, SCHOOL_SPECIFIC_CATEGORIES, SUBCATEGORIES,
   LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES,
   canFitInLocker, getLockerSizeForParcel,
+  calculateBuyerPrice, fmtRands,
 } from '@nextkid/shared';
 import type { ListingCategory, School, ParcelDimensions, SellerShippingOption } from '@nextkid/shared';
 
@@ -111,7 +112,7 @@ export default function SellScreen() {
   const loadSchools = (prov: string) => {
     if (!prov) { setSchools([]); return; }
     setLoadingSchools(true);
-    supabase.from('schools').select('*').eq('province', prov).order('name')
+    supabase.from('schools').select('*').eq('province_code', prov).order('name')
       .then(({ data }) => { setSchools((data as School[]) ?? []); setLoadingSchools(false); });
   };
 
@@ -414,6 +415,7 @@ export default function SellScreen() {
           <Text style={styles.label}>Price (R) *</Text>
           <TextInput style={styles.input} value={price} onChangeText={setPrice}
             placeholder="250" placeholderTextColor="#979797" keyboardType="numeric" />
+          {parseFloat(price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(price)} />}
 
           <Text style={styles.label}>Description</Text>
           <TextInput style={[styles.input, { height: 90, textAlignVertical: 'top' }]}
@@ -560,6 +562,58 @@ export default function SellScreen() {
   );
 }
 
+function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
+  const b = calculateBuyerPrice(sellerRands);
+  return (
+    <View style={styles.priceWidget}>
+      <View style={styles.priceWidgetHeader}>
+        <Text style={styles.priceWidgetTitle}>What the buyer pays</Text>
+        <Text style={styles.priceWidgetSub}>Gross-up formula</Text>
+      </View>
+      <View style={styles.priceWidgetBody}>
+        <PriceRow step="1" label="Your guaranteed payout"      value={fmtRands(b.sellerPayoutCents)} />
+        <PriceRow step="2" label="+ School delivery fee"       value={fmtRands(b.subtotalCents)}     sub={`+${fmtRands(b.deliveryFeeCents)}`} />
+        <PriceRow step="3" label="÷ (1-8%) NextKid markup"     value={fmtRands(b.afterMarkupCents)}  sub={`+${fmtRands(b.platformFeeCents)}`}  muted />
+        <PriceRow step="4" label="÷ (1-2.5%) Stitch fee"       value={fmtRands(b.buyerRawCents)}     sub={`+${fmtRands(b.gatewayFeeCents)}`}   muted />
+        <View style={styles.priceWidgetDivider} />
+        <PriceRow step="5" label="Round UP to nearest R25"     value={fmtRands(b.buyerPriceCents)}   highlight />
+        <PriceRow step="6" label="Admin fee (rounding surplus)" value={fmtRands(b.adminFeeCents)}    muted />
+      </View>
+      <View style={styles.priceWidgetFooter}>
+        <View>
+          <Text style={styles.priceFooterLabel}>Buyer pays</Text>
+          <Text style={styles.priceFooterValue}>{fmtRands(b.buyerPriceCents)}</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={styles.priceFooterLabel}>You receive</Text>
+          <Text style={styles.priceFooterValueSm}>{fmtRands(b.sellerPayoutCents)}</Text>
+        </View>
+      </View>
+      <Text style={styles.priceWidgetNote}>8% markup is for testing only — will be updated before going live</Text>
+    </View>
+  );
+}
+
+function PriceRow({ step, label, value, sub, muted, highlight }: {
+  step: string; label: string; value: string;
+  sub?: string; muted?: boolean; highlight?: boolean;
+}) {
+  return (
+    <View style={styles.priceRow}>
+      <View style={styles.priceStepBadge}>
+        <Text style={styles.priceStepText}>{step}</Text>
+      </View>
+      <Text style={[styles.priceRowLabel, muted && styles.priceRowLabelMuted]} numberOfLines={1}>{label}</Text>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[styles.priceRowValue, highlight && styles.priceRowValueHighlight, muted && styles.priceRowValueMuted]}>
+          {value}
+        </Text>
+        {sub && <Text style={styles.priceRowSub}>({sub})</Text>}
+      </View>
+    </View>
+  );
+}
+
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#dedede' }}>
@@ -632,4 +686,26 @@ const styles = StyleSheet.create({
   successBox:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   successTitle:       { color: '#111', fontSize: 26, fontWeight: '800', marginBottom: 8 },
   successSub:         { color: '#979797', fontSize: 14, marginBottom: 32, textAlign: 'center' },
+
+  // Buyer price widget
+  priceWidget:           { marginTop: 10, marginBottom: 8, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: SURF, overflow: 'hidden' },
+  priceWidgetHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: '#fff' },
+  priceWidgetTitle:      { color: '#979797', fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+  priceWidgetSub:        { color: '#979797', fontSize: 9 },
+  priceWidgetBody:       { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4, gap: 7 },
+  priceWidgetDivider:    { height: 1, backgroundColor: BORDER, marginVertical: 3 },
+  priceWidgetFooter:     { margin: 10, backgroundColor: BLUE, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  priceWidgetNote:       { color: '#979797', fontSize: 9, textAlign: 'center', paddingBottom: 10 },
+  priceFooterLabel:      { color: 'rgba(255,255,255,0.7)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1 },
+  priceFooterValue:      { color: '#fff', fontSize: 18, fontWeight: '800' },
+  priceFooterValueSm:    { color: '#fff', fontSize: 14, fontWeight: '600' },
+  priceRow:              { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  priceStepBadge:        { width: 16, height: 16, borderRadius: 8, backgroundColor: BORDER, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  priceStepText:         { color: '#555', fontSize: 7, fontWeight: '700' },
+  priceRowLabel:         { flex: 1, color: '#555', fontSize: 10 },
+  priceRowLabelMuted:    { color: '#979797' },
+  priceRowValue:         { color: '#111', fontSize: 10, fontWeight: '600' },
+  priceRowValueHighlight:{ color: BLUE },
+  priceRowValueMuted:    { color: '#979797' },
+  priceRowSub:           { color: '#979797', fontSize: 8 },
 });

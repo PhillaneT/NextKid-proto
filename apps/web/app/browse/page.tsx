@@ -5,8 +5,9 @@ import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
-  School as SchoolIcon, Search,
+  School as SchoolIcon, Search, ShoppingCart, Check,
 } from 'lucide-react';
+import { useCart } from '@/lib/cart';
 import { ALL_CATEGORIES, PLATFORM_DEFAULTS } from '@nextkid/shared';
 import type { ListingCategory, School } from '@nextkid/shared';
 
@@ -36,6 +37,7 @@ type Item = {
   category: string;
   price_cents: number;
   images: string[];
+  seller_id: string;
   seller_school_id: string | null;
   is_school_specific: boolean;
   size: string | null;
@@ -46,6 +48,7 @@ type BrowseTab = 'my_school' | 'all';
 export default function BrowsePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { add, has } = useCart();
   const [tab, setTab] = useState<BrowseTab>('all');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +87,7 @@ export default function BrowsePage() {
     setLoading(true);
     let query = supabase
       .from('listings')
-      .select('id, title, category, price_cents, images, seller_school_id, is_school_specific, size')
+      .select('id, title, category, price_cents, images, seller_id, seller_school_id, is_school_specific, size')
       .eq('status', 'ACTIVE')
       .order('created_at', { ascending: false });
 
@@ -146,12 +149,12 @@ export default function BrowsePage() {
         </div>
 
         {/* Category pills */}
-        <div className="flex flex-wrap gap-2 mb-8">
+        <div className="flex gap-2 mb-8 overflow-x-auto pb-1 scrollbar-hide">
           {(['All', ...ALL_CATEGORIES] as Array<ListingCategory | 'All'>).map(cat => (
             <button
               key={cat}
               onClick={() => setCategory(cat)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition ${
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition shrink-0 ${
                 category === cat
                   ? 'bg-[#BE1E2D] text-white'
                   : 'bg-[#f4f4f4] text-[#111] hover:bg-[#fde8ea] hover:text-[#BE1E2D]'
@@ -207,7 +210,34 @@ export default function BrowsePage() {
                     {item.size && <span className="ml-auto bg-[#f4f4f4] px-1.5 py-0.5 rounded text-[10px]">Size {item.size}</span>}
                   </p>
                   <h3 className="text-sm font-medium text-[#111] line-clamp-2 leading-snug mb-2">{item.title}</h3>
-                  <p className="text-base font-bold text-[#BE1E2D]">R{(item.price_cents / 100).toLocaleString()}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-base font-bold text-[#BE1E2D]">R{(item.price_cents / 100).toLocaleString()}</p>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation()
+                        add({
+                          listingId: item.id,
+                          title: item.title,
+                          price_cents: item.price_cents,
+                          image: item.images?.[0] ?? null,
+                          sellerId: item.seller_id,
+                          category: item.category,
+                          size: item.size,
+                        })
+                      }}
+                      className={`shrink-0 p-1.5 rounded-full border transition ${
+                        has(item.id)
+                          ? 'bg-[#BE1E2D] border-[#BE1E2D] text-white'
+                          : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
+                      }`}
+                      title={has(item.id) ? 'In cart' : 'Add to cart'}
+                    >
+                      {has(item.id)
+                        ? <Check size={13} strokeWidth={2.5} />
+                        : <ShoppingCart size={13} strokeWidth={2} />
+                      }
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

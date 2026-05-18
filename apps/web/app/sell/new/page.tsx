@@ -11,6 +11,7 @@ import {
   ALL_CATEGORIES, SCHOOL_SPECIFIC_CATEGORIES, SUBCATEGORIES,
   LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES,
   canFitInLocker, getLockerSizeForParcel,
+  calculateBuyerPrice, fmtRands,
 } from '@nextkid/shared';
 import type { ListingCategory, School as SchoolType, ParcelDimensions, SellerShippingOption } from '@nextkid/shared';
 import LockerMapPicker from '../../components/LockerMapPicker';
@@ -491,9 +492,11 @@ export default function NewListingPage() {
             })()}
 
             <div>
-              <label className={labelCls}>Price (Rands)</label>
+              <label className={labelCls}>Your asking price (Rands)</label>
               <input type="number" className={inputCls} value={form.price}
-                onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" />
+                onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" min="10" />
+              {/* Buyer price calculator */}
+              {parseFloat(form.price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(form.price)} />}
             </div>
 
             <div>
@@ -688,4 +691,60 @@ export default function NewListingPage() {
       </div>
     </div>
   );
+}
+
+// ── Buyer Price Widget ─────────────────────────────────────────────────────────
+
+function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
+  const b = calculateBuyerPrice(sellerRands)
+
+  return (
+    <div className="mt-3 rounded-2xl border border-[#dedede] bg-[#fafafa] overflow-hidden text-xs">
+      <div className="px-4 py-2.5 border-b border-[#dedede] bg-white flex items-center justify-between">
+        <p className="font-semibold text-[#979797] uppercase tracking-wide">What the buyer pays</p>
+        <p className="text-[#979797]">Gross-up formula</p>
+      </div>
+      <div className="px-4 py-3 space-y-1.5">
+        <Row step="1" label="Your guaranteed payout"       value={fmtRands(b.sellerPayoutCents)} />
+        <Row step="2" label="+ School delivery fee"        value={fmtRands(b.subtotalCents)}      sub={`+ ${fmtRands(b.deliveryFeeCents)}`} />
+        <Row step="3" label="÷ (1 − 8%) NextKid markup"   value={fmtRands(b.afterMarkupCents)}   sub={`+ ${fmtRands(b.platformFeeCents)}`} muted />
+        <Row step="4" label="÷ (1 − 2.5%) Stitch fee"     value={fmtRands(b.buyerRawCents)}      sub={`+ ${fmtRands(b.gatewayFeeCents)}`}  muted />
+        <div className="border-t border-[#dedede] pt-2 mt-1 space-y-1.5">
+          <Row step="5" label="Round UP to nearest R25"   value={fmtRands(b.buyerPriceCents)} highlight />
+          <Row step="6" label="Admin fee (rounding surplus)" value={fmtRands(b.adminFeeCents)} muted />
+        </div>
+      </div>
+      <div className="px-4 pb-3">
+        <div className="bg-[#BE1E2D] rounded-xl px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-white/70 text-[10px] uppercase tracking-wide">Buyer pays</p>
+            <p className="text-white text-lg font-bold">{fmtRands(b.buyerPriceCents)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-white/70 text-[10px] uppercase tracking-wide">You receive</p>
+            <p className="text-white text-base font-semibold">{fmtRands(b.sellerPayoutCents)}</p>
+          </div>
+        </div>
+        <p className="text-[#979797] text-center mt-2 text-[10px]">
+          8% markup is for testing only — will be updated before going live
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function Row({ step, label, value, sub, muted, highlight }: {
+  step: string; label: string; value: string
+  sub?: string; muted?: boolean; highlight?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-5 h-5 rounded-full bg-[#dedede] text-[#555] font-bold text-[9px] flex items-center justify-center shrink-0">{step}</span>
+      <span className={`flex-1 ${muted ? 'text-[#979797]' : 'text-[#555]'}`}>{label}</span>
+      <div className="text-right">
+        <span className={`font-semibold ${highlight ? 'text-[#BE1E2D]' : muted ? 'text-[#979797]' : 'text-[#111]'}`}>{value}</span>
+        {sub && <span className="ml-1.5 text-[#979797]">({sub})</span>}
+      </div>
+    </div>
+  )
 }

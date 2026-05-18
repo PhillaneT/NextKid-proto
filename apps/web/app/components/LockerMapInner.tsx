@@ -4,7 +4,7 @@
 // Leaflet accesses window/document at import time and will crash Next.js SSR.
 
 import { useEffect } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -17,14 +17,19 @@ export interface LockerMapLocker {
   distanceKm?: number
 }
 
+export interface LatLng { lat: number; lng: number }
+
 interface Props {
   lockers: LockerMapLocker[]
-  center: { lat: number; lng: number }
+  center: LatLng
   selectedId?: string
+  userPos?: LatLng | null
+  routeCoords?: [number, number][]
   onSelect: (locker: { id: string; name: string; address: string }) => void
+  onMapClick: (pos: LatLng) => void
 }
 
-// Custom HTML pin — avoids broken default Leaflet PNG icons in Next.js
+// Custom HTML locker pin
 function makePinIcon(selected: boolean) {
   const fill = selected ? '#BE1E2D' : '#ffffff'
   const stroke = selected ? '#BE1E2D' : '#666666'
@@ -42,8 +47,16 @@ function makePinIcon(selected: boolean) {
   })
 }
 
+// Blue pulsing dot for the user's clicked origin point
+const userIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 3px rgba(37,99,235,0.35)"></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+})
+
 // Smoothly re-centers the map when the suburb/city changes
-function RecenterMap({ center }: { center: { lat: number; lng: number } }) {
+function RecenterMap({ center }: { center: LatLng }) {
   const map = useMap()
   useEffect(() => {
     map.flyTo([center.lat, center.lng], 13, { duration: 0.8 })
@@ -51,12 +64,24 @@ function RecenterMap({ center }: { center: { lat: number; lng: number } }) {
   return null
 }
 
-export default function LockerMapInner({ lockers, center, selectedId, onSelect }: Props) {
+// Captures map clicks and forwards the lat/lng to the parent
+function ClickHandler({ onMapClick }: { onMapClick: (pos: LatLng) => void }) {
+  useMapEvents({
+    click(e) {
+      onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng })
+    },
+  })
+  return null
+}
+
+export default function LockerMapInner({
+  lockers, center, selectedId, userPos, routeCoords, onSelect, onMapClick,
+}: Props) {
   return (
     <MapContainer
       center={[center.lat, center.lng]}
       zoom={13}
-      style={{ height: '300px', width: '100%' }}
+      style={{ height: '360px', width: '100%', cursor: 'crosshair' }}
       scrollWheelZoom={false}
     >
       <TileLayer
@@ -64,6 +89,28 @@ export default function LockerMapInner({ lockers, center, selectedId, onSelect }
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <RecenterMap center={center} />
+      <ClickHandler onMapClick={onMapClick} />
+
+      {/* Driving route polyline */}
+      {routeCoords && routeCoords.length > 0 && (
+        <Polyline
+          positions={routeCoords}
+          pathOptions={{ color: '#2563eb', weight: 4, opacity: 0.85, dashArray: undefined }}
+        />
+      )}
+
+      {/* User's origin marker */}
+      {userPos && (
+        <Marker position={[userPos.lat, userPos.lng]} icon={userIcon}>
+          <Popup>
+            <p style={{ margin: 0, fontSize: '12px', fontWeight: 600, color: '#2563eb' }}>
+              Your location
+            </p>
+          </Popup>
+        </Marker>
+      )}
+
+      {/* Locker pins */}
       {lockers.map(locker => (
         <Marker
           key={locker.id}

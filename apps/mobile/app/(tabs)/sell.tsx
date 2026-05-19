@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/src/lib/supabase';
+import { WEB_API_BASE } from '@/src/lib/api';
 import {
   Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
 } from 'lucide-react-native';
@@ -121,11 +122,17 @@ export default function SellScreen() {
     });
   });
 
-  const loadSchools = (prov: string) => {
-    if (!prov) { setSchools([]); return; }
+  const searchSchools = async (q: string, prov: string) => {
+    if (q.trim().length < 2) { setSchools([]); return; }
     setLoadingSchools(true);
-    supabase.from('schools').select('*').eq('province_code', prov).order('name')
-      .then(({ data }) => { setSchools((data as School[]) ?? []); setLoadingSchools(false); });
+    try {
+      const params = new URLSearchParams({ q: q.trim(), limit: '20' });
+      if (prov) params.set('province', prov);
+      const res  = await fetch(`${WEB_API_BASE}/api/locations/schools/search?${params}`);
+      const data = await res.json();
+      setSchools(Array.isArray(data) ? data as School[] : []);
+    } catch { setSchools([]); }
+    setLoadingSchools(false);
   };
 
   const nextStep = () => {
@@ -233,8 +240,7 @@ export default function SellScreen() {
     setSuccess(false);
   };
 
-  const filteredSchools  = schools.filter(s => s.name.toLowerCase().includes(schoolSearch.toLowerCase()));
-  const TOTAL_STEPS      = isSchoolSpecific ? 5 : 4;
+  const TOTAL_STEPS = isSchoolSpecific ? 5 : 4;
   const displayStep      = step === 1 ? 1 : step === 2 ? 2 : isSchoolSpecific ? step : step - 1;
 
   if (success) return (
@@ -316,22 +322,23 @@ export default function SellScreen() {
               <View style={styles.chipRow}>
                 {SA_PROVINCES.map(p => (
                   <TouchableOpacity key={p}
-                    onPress={() => { setProvince(p); loadSchools(p); setSchoolSearch(''); setSelectedSchool(null); }}
+                    onPress={() => { setProvince(p); setSchools([]); setSchoolSearch(''); setSelectedSchool(null); }}
                     style={[styles.chip, province === p && styles.chipActive]}>
                     <Text style={[styles.chipText, province === p && styles.chipTextActive]}>{p}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
-              {province && <>
-                <Text style={styles.label}>Search school</Text>
-                <TextInput style={styles.input} value={schoolSearch} onChangeText={setSchoolSearch}
-                  placeholder="Type school name..." placeholderTextColor="#979797" />
+              <Text style={styles.label}>Search school (type at least 2 letters)</Text>
+              <TextInput style={styles.input} value={schoolSearch}
+                onChangeText={v => { setSchoolSearch(v); searchSchools(v, province); }}
+                placeholder="e.g. Noordwyk, Hoërskool..." placeholderTextColor="#979797" />
+              {schoolSearch.trim().length >= 2 && (
                 <View style={styles.schoolList}>
                   {loadingSchools
                     ? <ActivityIndicator color={BLUE} style={{ padding: 16 }} />
-                    : filteredSchools.length === 0
-                      ? <Text style={styles.emptyText}>No schools found.</Text>
-                      : filteredSchools.map(school => (
+                    : schools.length === 0
+                      ? <Text style={styles.emptyText}>No schools found — try a shorter name.</Text>
+                      : schools.map(school => (
                         <TouchableOpacity key={school.id} onPress={() => setSelectedSchool(school)}
                           style={[styles.schoolRow, selectedSchool?.id === school.id && styles.schoolRowActive]}>
                           <View style={{ flex: 1 }}>
@@ -343,7 +350,7 @@ export default function SellScreen() {
                       ))
                   }
                 </View>
-              </>}
+              )}
               {selectedSchool && (
                 <View style={styles.selectedBanner}>
                   <Text style={styles.selectedBannerText}>🏫 {selectedSchool.name}</Text>
@@ -368,6 +375,20 @@ export default function SellScreen() {
         {/* ── Step 3 — Item details ──────────────────────────── */}
         {step === 3 && <>
           <Text style={styles.stepTitle}>Item details</Text>
+
+          {/* ── Multi-item toggle — choose FIRST before filling anything ── */}
+          <View style={styles.multiToggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.multiToggleTitle}>Multiple items in this listing?</Text>
+              <Text style={styles.multiToggleSub}>e.g. shoes, shirt and pants — each priced separately</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.toggle, isMultiItem && styles.toggleOn]}
+              onPress={() => setIsMultiItem(v => !v)}
+            >
+              <View style={[styles.toggleThumb, isMultiItem && styles.toggleThumbOn]} />
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.label}>Title *</Text>
           <TextInput style={styles.input} value={title} onChangeText={setTitle}
@@ -444,20 +465,6 @@ export default function SellScreen() {
               </>
             );
           })()}
-
-          {/* Multi-item toggle */}
-          <View style={styles.multiToggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.multiToggleTitle}>Multiple items in this listing?</Text>
-              <Text style={styles.multiToggleSub}>e.g. shoes, shirt and pants — each priced separately</Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.toggle, isMultiItem && styles.toggleOn]}
-              onPress={() => setIsMultiItem(v => !v)}
-            >
-              <View style={[styles.toggleThumb, isMultiItem && styles.toggleThumbOn]} />
-            </TouchableOpacity>
-          </View>
 
           {/* Single item: price + buyer price calculator */}
           {!isMultiItem && (

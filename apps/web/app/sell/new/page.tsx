@@ -163,11 +163,18 @@ export default function NewListingPage() {
     });
   }, []);
 
-  const loadSchools = (prov: string) => {
-    if (!prov) { setSchools([]); return; }
+  // Search schools live via API — avoids the 1000-row PostgREST default limit
+  const searchSchools = async (q: string, prov: string) => {
+    if (q.trim().length < 2) { setSchools([]); return; }
     setLoadingSchools(true);
-    supabase.from('schools').select('*').eq('province_code', prov).order('name')
-      .then(({ data }) => { setSchools((data as SchoolType[]) ?? []); setLoadingSchools(false); });
+    try {
+      const params = new URLSearchParams({ q: q.trim(), limit: '20' });
+      if (prov) params.set('province', prov);
+      const res  = await fetch(`/api/locations/schools/search?${params}`);
+      const data = await res.json();
+      setSchools(Array.isArray(data) ? data as SchoolType[] : []);
+    } catch { setSchools([]); }
+    setLoadingSchools(false);
   };
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -303,7 +310,6 @@ export default function NewListingPage() {
     if (step > 1) setStep((step - 1) as Step);
   };
 
-  const filteredSchools = schools.filter(s => s.name.toLowerCase().includes(schoolSearch.toLowerCase()));
   const TOTAL_STEPS = isSchoolSpecific ? 5 : 4;
   const displayStep = step === 1 ? 1 : step === 2 ? 2 : isSchoolSpecific ? step : step - 1;
 
@@ -400,36 +406,38 @@ export default function NewListingPage() {
                 </div>
               ) : (
                 <>
-                  <label className={labelCls}>Province</label>
+                  <label className={labelCls}>Province <span className="text-[#979797] font-normal">(optional — narrows results)</span></label>
                   <select className={`${inputCls} mb-4`} value={province}
-                    onChange={e => { setProvince(e.target.value); loadSchools(e.target.value); setSchoolSearch(''); setSelectedSchool(null); }}>
-                    <option value="">Select province...</option>
+                    onChange={e => { setProvince(e.target.value); setSchools([]); setSchoolSearch(''); setSelectedSchool(null); }}>
+                    <option value="">All provinces</option>
                     {SA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
 
-                  {province && <>
-                    <label className={labelCls}>Search school</label>
-                    <input className={`${inputCls} mb-3`} value={schoolSearch} onChange={e => setSchoolSearch(e.target.value)} placeholder="Type school name..." />
+                  <label className={labelCls}>Search school <span className="text-[#979797] font-normal">(type at least 2 letters)</span></label>
+                  <input className={`${inputCls} mb-3`} value={schoolSearch}
+                    onChange={e => { setSchoolSearch(e.target.value); searchSchools(e.target.value, province); }}
+                    placeholder="e.g. Noordwyk, Hoërskool, St John's..." />
+                  {schoolSearch.trim().length >= 2 && (
                     <div className="border border-[#dedede] rounded-xl overflow-hidden max-h-52 overflow-y-auto mb-4">
                       {loadingSchools
-                        ? <p className="text-[#979797] p-4 text-center text-sm">Loading...</p>
-                        : filteredSchools.length === 0
-                          ? <p className="text-[#979797] p-4 text-center text-sm">No schools found.</p>
-                          : filteredSchools.map(school => (
+                        ? <p className="text-[#979797] p-4 text-center text-sm">Searching...</p>
+                        : schools.length === 0
+                          ? <p className="text-[#979797] p-4 text-center text-sm">No schools found — try a shorter name or different spelling.</p>
+                          : schools.map(school => (
                             <div key={school.id} onClick={() => setSelectedSchool(school)}
                               className={`p-3 cursor-pointer flex justify-between items-center border-b border-[#dedede] ${
                                 selectedSchool?.id === school.id ? 'bg-[#fde8ea]' : 'hover:bg-[#f4f4f4]'
                               }`}>
                               <div>
                                 <p className="text-[#111] text-sm">{school.name}</p>
-                                <p className="text-[#979797] text-xs">{school.city_name} · {school.type}</p>
+                                <p className="text-[#979797] text-xs">{school.city_name ?? school.city} · {school.type}</p>
                               </div>
                               {selectedSchool?.id === school.id && <CheckCircle2 size={16} className="text-[#BE1E2D]" />}
                             </div>
                           ))
                       }
                     </div>
-                  </>}
+                  )}
 
                   {selectedSchool && (
                     <div className="bg-[#fde8ea] border border-[#BE1E2D]/30 rounded-xl p-3 flex justify-between items-center">
@@ -454,6 +462,21 @@ export default function NewListingPage() {
           {/* ── Step 3 — Item details ─────────────────────────────── */}
           {step === 3 && <>
             <h2 className="text-[#111] font-semibold text-lg mb-4">Item details</h2>
+
+            {/* ── Multi-item toggle — choose FIRST before filling anything ── */}
+            <div className="flex items-center justify-between p-4 bg-[#f4f4f4] rounded-2xl border border-[#dedede]">
+              <div>
+                <p className="text-sm font-semibold text-[#111]">Multiple items in this listing?</p>
+                <p className="text-xs text-[#979797] mt-0.5">e.g. a bag with shoes, shirts and pants — each priced separately</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMultiItem(v => !v)}
+                className={`relative w-11 h-6 rounded-full transition ${isMultiItem ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`}
+              >
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${isMultiItem ? 'left-6' : 'left-1'}`} />
+              </button>
+            </div>
 
             <div>
               <label className={labelCls}>Title</label>
@@ -534,21 +557,6 @@ export default function NewListingPage() {
                 </>
               );
             })()}
-
-            {/* ── Multi-item toggle ── */}
-            <div className="flex items-center justify-between p-4 bg-[#f4f4f4] rounded-2xl border border-[#dedede]">
-              <div>
-                <p className="text-sm font-semibold text-[#111]">Multiple items in this listing?</p>
-                <p className="text-xs text-[#979797] mt-0.5">e.g. a bag with shoes, shirts and pants — each priced separately</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsMultiItem(v => !v)}
-                className={`relative w-11 h-6 rounded-full transition ${isMultiItem ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${isMultiItem ? 'left-6' : 'left-1'}`} />
-              </button>
-            </div>
 
             {/* Single item: price + buyer price widget */}
             {!isMultiItem && (

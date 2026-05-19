@@ -60,12 +60,12 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div>
-          <div className="leading-none mb-2">
-            <img src="/logo.png" alt="NextKid" style={{ height: '144px', width: 'auto', marginLeft: '-10px' }} />
+          <div style={{ display: 'inline-block', marginLeft: '-10px', marginBottom: '28px' }}>
+            <img src="/logo.png" alt="NextKid" style={{ height: '144px', width: 'auto', display: 'block' }} />
+            <p style={{ letterSpacing: '0.22em', fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', fontWeight: 500, textTransform: 'uppercase', textAlign: 'center', marginTop: '6px' }}>
+              Wear.&nbsp; Grow.&nbsp; Repeat.
+            </p>
           </div>
-          <p style={{ letterSpacing: '0.22em', fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', fontWeight: 500, textTransform: 'uppercase', marginBottom: '28px', textAlign: 'center' }}>
-            Wear.&nbsp; Grow.&nbsp; Repeat.
-          </p>
 
           {/* Community badge */}
           <div className="inline-flex items-center gap-2 border border-[#BE1E2D]/50 rounded-full px-4 py-1.5">

@@ -231,9 +231,8 @@ async function sendEmail(to: string, subject: string, body: string, name: string
         subject,
         html: `
           <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px">
-            <div style="background:#3A3A3A;padding:20px 24px;border-radius:12px 12px 0 0">
-              <span style="font-size:24px;font-weight:900;color:#fff;letter-spacing:1px">NEXT</span>
-              <span style="font-size:24px;font-weight:900;color:#BE1E2D;letter-spacing:1px">KID</span>
+            <div style="background:#3A3A3A;padding:16px 24px;border-radius:12px 12px 0 0">
+              <img src="${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/logo.png" alt="NextKid" style="height:40px;width:auto" />
             </div>
             <div style="background:#fff;border:1px solid #dedede;border-top:none;padding:28px;border-radius:0 0 12px 12px">
               <p style="color:#979797;font-size:13px;margin:0 0 4px">Hi ${name},</p>

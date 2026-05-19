@@ -61,7 +61,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="flex flex-col items-start gap-4">
           <div style={{ display: 'inline-block', marginLeft: '-10px' }}>
-            <img src="/logo.png" alt="NextKid" style={{ height: '144px', width: 'auto', display: 'block' }} />
+            <img src="/logo.png" alt="NextKid" style={{ height: '108px', width: 'auto', display: 'block' }} />
             <p style={{ letterSpacing: '0.22em', fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', fontWeight: 500, textTransform: 'uppercase', textAlign: 'center', marginTop: '6px' }}>
               Wear.&nbsp; Grow.&nbsp; Repeat.
             </p>

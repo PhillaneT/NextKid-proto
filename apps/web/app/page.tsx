@@ -59,15 +59,15 @@ export default function LoginPage() {
       <div className="hidden md:flex flex-col justify-between w-1/2 bg-[#3A3A3A] p-12">
 
         {/* Logo */}
-        <div>
-          <div style={{ display: 'inline-block', marginLeft: '-10px', marginBottom: '28px' }}>
+        <div className="flex flex-col items-start gap-4">
+          <div style={{ display: 'inline-block', marginLeft: '-10px' }}>
             <img src="/logo.png" alt="NextKid" style={{ height: '144px', width: 'auto', display: 'block' }} />
             <p style={{ letterSpacing: '0.22em', fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', fontWeight: 500, textTransform: 'uppercase', textAlign: 'center', marginTop: '6px' }}>
               Wear.&nbsp; Grow.&nbsp; Repeat.
             </p>
           </div>
 
-          {/* Community badge */}
+          {/* Community badge — below tagline */}
           <div className="inline-flex items-center gap-2 border border-[#BE1E2D]/50 rounded-full px-4 py-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-[#BE1E2D]" />
             <span style={{ color: '#BE1E2D', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase' }}>Community Focused</span>

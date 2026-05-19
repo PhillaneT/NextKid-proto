@@ -7,6 +7,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/src/lib/supabase';
 import { Pencil, Check, X, MapPin, ShoppingCart } from 'lucide-react-native';
+import { useCart } from '@/src/lib/cart';
+import type { SelectedListingItem } from '@/src/lib/cart';
 
 const CRIMSON = '#BE1E2D';
 const BORDER  = '#dedede';
@@ -24,6 +26,8 @@ type Listing = {
   status: string;
   seller_suburb_name: string | null;
   seller_city_name: string | null;
+  is_multi_item: boolean;
+  available_count: number;
 };
 
 // listings table stores condition uppercase
@@ -36,10 +40,14 @@ export default function ItemDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router  = useRouter();
 
-  const [listing,       setListing]       = useState<Listing | null>(null);
-  const [loading,       setLoading]       = useState(true);
-  const [selectedImage, setSelectedImage] = useState(0);
-  const [isOwner,       setIsOwner]       = useState(false);
+  const { add, has } = useCart();
+
+  const [listing,         setListing]         = useState<Listing | null>(null);
+  const [listingItems,    setListingItems]     = useState<SelectedListingItem[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [loading,         setLoading]         = useState(true);
+  const [selectedImage,   setSelectedImage]   = useState(0);
+  const [isOwner,         setIsOwner]         = useState(false);
 
   // Edit state
   const [editing,       setEditing]       = useState(false);
@@ -54,7 +62,7 @@ export default function ItemDetailScreen() {
       const [{ data: listingData }, { data: { user } }] = await Promise.all([
         supabase
           .from('listings')
-          .select('id, title, category, price_cents, description, images, condition, seller_id, status, seller_suburb_name, seller_city_name')
+          .select('id, title, category, price_cents, description, images, condition, seller_id, status, seller_suburb_name, seller_city_name, is_multi_item, available_count')
           .eq('id', id)
           .single(),
         supabase.auth.getUser(),
@@ -63,6 +71,18 @@ export default function ItemDetailScreen() {
       if (!listingData) { router.back(); return; }
       setListing(listingData as Listing);
       if (user) setIsOwner(user.id === listingData.seller_id);
+
+      if (listingData.is_multi_item) {
+        const { data: items } = await supabase
+          .from('listing_items')
+          .select('id, name, price_cents, size_label')
+          .eq('listing_id', id)
+          .eq('status', 'available')
+          .order('price_cents', { ascending: true });
+        setListingItems((items ?? []).map(i => ({
+          id: i.id, name: i.name, price_cents: i.price_cents, size_label: i.size_label,
+        })));
+      }
       setLoading(false);
     }
     load();
@@ -257,13 +277,81 @@ export default function ItemDetailScreen() {
         </View>
       ) : !isOwner && isActive ? (
         <View style={styles.cta}>
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            onPress={() => router.push(`/checkout/${listing.id}` as never)}
-          >
-            <ShoppingCart size={18} strokeWidth={2.5} color="#fff" />
-            <Text style={styles.primaryBtnText}>Buy Now — R{(listing.price_cents / 100).toLocaleString()}</Text>
-          </TouchableOpacity>
+          {listing.is_multi_item && listingItems.length > 0 ? (
+            <>
+              {/* Item checklist */}
+              <Text style={styles.itemPickLabel}>
+                Select items <Text style={{ color: '#979797', fontWeight: '400' }}>({listing.available_count} available)</Text>
+              </Text>
+              <View style={styles.itemPickList}>
+                {listingItems.map(li => {
+                  const checked = selectedItemIds.has(li.id);
+                  return (
+                    <TouchableOpacity key={li.id}
+                      style={[styles.itemPickRow, checked && styles.itemPickRowActive]}
+                      onPress={() => setSelectedItemIds(prev => {
+                        const n = new Set(prev); n.has(li.id) ? n.delete(li.id) : n.add(li.id); return n;
+                      })}
+                    >
+                      <View style={[styles.itemCheckbox, checked && styles.itemCheckboxOn]}>
+                        {checked && <Check size={11} strokeWidth={3} color="#fff" />}
+                      </View>
+                      <Text style={styles.itemPickName} numberOfLines={1}>{li.name}</Text>
+                      {li.size_label ? <Text style={styles.itemPickSize}>{li.size_label}</Text> : null}
+                      <Text style={styles.itemPickPrice}>R{(li.price_cents / 100).toFixed(2)}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {selectedItemIds.size > 0 && (
+                <View style={styles.itemPickTotal}>
+                  <Text style={styles.itemPickTotalLabel}>{selectedItemIds.size} selected</Text>
+                  <Text style={styles.itemPickTotalValue}>
+                    Total R{(listingItems.filter(i => selectedItemIds.has(i.id)).reduce((s, i) => s + i.price_cents, 0) / 100).toFixed(2)}
+                  </Text>
+                </View>
+              )}
+              {has(listing.id) ? (
+                <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: '#16a34a' }]}
+                  onPress={() => router.push('/cart' as never)}>
+                  <Check size={18} strokeWidth={2.5} color="#fff" />
+                  <Text style={styles.primaryBtnText}>Added — View Cart</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.primaryBtn, selectedItemIds.size === 0 && styles.btnDisabled]}
+                  disabled={selectedItemIds.size === 0}
+                  onPress={() => {
+                    const selected = listingItems.filter(i => selectedItemIds.has(i.id));
+                    add({
+                      listingId: listing.id, title: listing.title,
+                      price_cents: selected.reduce((s, i) => s + i.price_cents, 0),
+                      image: listing.images?.[0] ?? null,
+                      sellerId: listing.seller_id, category: listing.category,
+                      selectedItems: selected,
+                    });
+                  }}
+                >
+                  <ShoppingCart size={18} strokeWidth={2.5} color="#fff" />
+                  <Text style={styles.primaryBtnText}>
+                    {selectedItemIds.size === 0 ? 'Select items above' : `Add ${selectedItemIds.size} item${selectedItemIds.size !== 1 ? 's' : ''} to cart`}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : listing.is_multi_item && listingItems.length === 0 ? (
+            <View style={[styles.primaryBtn, styles.btnDisabled]}>
+              <Text style={[styles.primaryBtnText, { color: '#979797' }]}>All items sold</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => router.push(`/checkout/${listing.id}` as never)}
+            >
+              <ShoppingCart size={18} strokeWidth={2.5} color="#fff" />
+              <Text style={styles.primaryBtnText}>Buy Now — R{(listing.price_cents / 100).toLocaleString()}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : null}
     </SafeAreaView>
@@ -316,7 +404,22 @@ const styles = StyleSheet.create({
   chipText:       { color: '#979797', fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: CRIMSON },
 
-  cta:            { padding: 14, borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: '#fff' },
+  cta:            { padding: 14, borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: '#fff', gap: 10 },
   primaryBtn:     { backgroundColor: CRIMSON, borderRadius: 30, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  btnDisabled:    { backgroundColor: SURFACE },
+
+  // Multi-item checklist
+  itemPickLabel:      { color: '#111', fontSize: 14, fontWeight: '600' },
+  itemPickList:       { borderWidth: 1, borderColor: BORDER, borderRadius: 14, overflow: 'hidden' },
+  itemPickRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: SURFACE },
+  itemPickRowActive:  { backgroundColor: '#fff5f5' },
+  itemCheckbox:       { width: 20, height: 20, borderRadius: 5, borderWidth: 2, borderColor: BORDER, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  itemCheckboxOn:     { backgroundColor: CRIMSON, borderColor: CRIMSON },
+  itemPickName:       { flex: 1, color: '#111', fontSize: 13, fontWeight: '500' },
+  itemPickSize:       { color: '#979797', fontSize: 12 },
+  itemPickPrice:      { color: CRIMSON, fontSize: 13, fontWeight: '700', flexShrink: 0 },
+  itemPickTotal:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: SURFACE, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  itemPickTotalLabel: { color: '#979797', fontSize: 12 },
+  itemPickTotalValue: { color: CRIMSON, fontSize: 14, fontWeight: '700' },
 });

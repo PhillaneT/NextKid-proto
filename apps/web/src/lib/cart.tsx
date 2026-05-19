@@ -2,14 +2,24 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 
-export interface CartItem {
-  listingId: string
-  title: string
+// A single item within a multi-item listing that the buyer has selected
+export interface SelectedListingItem {
+  id:          string   // listing_items.id
+  name:        string
   price_cents: number
-  image: string | null
-  sellerId: string
-  category: string
-  size?: string | null
+  size_label:  string | null
+}
+
+export interface CartItem {
+  listingId:   string
+  title:       string
+  price_cents: number   // total: sum of selectedItems prices (or single price)
+  image:       string | null
+  sellerId:    string
+  category:    string
+  size?:       string | null
+  // Multi-item: which specific items the buyer chose
+  selectedItems?: SelectedListingItem[]
 }
 
 interface CartContextValue {

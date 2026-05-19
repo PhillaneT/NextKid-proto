@@ -13,10 +13,13 @@ const CreateOrderSchema = z.object({
     rate: z.number().positive(),       // ZAR float — converted to cents server-side
     estimatedDeliveryFrom: z.string(), // ISO string
     estimatedDeliveryTo: z.string(),
-  }),
+  }).nullable().optional(),
   // RULE: buyer's chosen PUDO locker — required for D2L and L2L shipments, null otherwise
-  buyerLockerId:   z.string().nullable().optional(),
-  buyerLockerName: z.string().nullable().optional(),
+  buyerLockerId:    z.string().nullable().optional(),
+  buyerLockerName:  z.string().nullable().optional(),
+  // Multi-item: which listing_items the buyer selected
+  selectedItemIds:  z.array(z.string().uuid()).optional(),
+  cartCheckout:     z.boolean().optional(),
 })
 
 export async function POST(req: NextRequest) {
@@ -32,7 +35,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid_body', message: parsed.error.message }, { status: 400 })
   }
-  const { listingId, selectedQuote, buyerLockerId, buyerLockerName } = parsed.data
+  const { listingId, selectedQuote, buyerLockerId, buyerLockerName, selectedItemIds } = parsed.data
 
   // 2. Authenticate the buyer
   const authHeader = req.headers.get('Authorization') ?? ''
@@ -57,7 +60,7 @@ export async function POST(req: NextRequest) {
   // RULE: Always re-validate at order creation — state may have changed since quote was fetched
   const { data: listing, error: listingError } = await serverClient
     .from('listings')
-    .select('seller_id, price_cents, status')
+    .select('seller_id, price_cents, status, is_multi_item, available_count')
     .eq('id', listingId)
     .single()
 
@@ -71,31 +74,48 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'cannot_buy_own_item' }, { status: 400 })
   }
 
-  // 4. Compute money — all in integer cents to avoid floating point errors
-  // RULE: Buyer pays shipping. Seller only sees item price. Commission calculated at completion.
-  const itemPriceCents: number = listing.price_cents
-  const shippingCostCents: number = Math.round(selectedQuote.rate * 100)
-  const totalPaidCents: number = itemPriceCents + shippingCostCents
+  // 4. Compute money
+  // For multi-item: sum of selected item prices. For single-item: listing price.
+  let itemPriceCents: number = listing.price_cents
+  let purchasedItemIds: string[] = []
 
-  // 5. Insert the order (service-role bypasses RLS — we've already verified auth above)
-  // TODO: snapshot buyer's delivery address to the order row before go-live
+  if (listing.is_multi_item && selectedItemIds && selectedItemIds.length > 0) {
+    const { data: items, error: itemsErr } = await serverClient
+      .from('listing_items')
+      .select('id, price_cents, status')
+      .in('id', selectedItemIds)
+
+    if (itemsErr || !items) {
+      return NextResponse.json({ error: 'items_not_found' }, { status: 404 })
+    }
+    // Validate all items are available or reserved by this buyer
+    const badItems = items.filter(i => i.status === 'sold')
+    if (badItems.length > 0) {
+      return NextResponse.json({ error: 'items_already_sold' }, { status: 409 })
+    }
+    itemPriceCents   = items.reduce((s, i) => s + i.price_cents, 0)
+    purchasedItemIds = items.map(i => i.id)
+  }
+
+  const shippingCostCents: number = selectedQuote ? Math.round(selectedQuote.rate * 100) : 0
+  const totalPaidCents: number    = itemPriceCents + shippingCostCents
+
+  // 5. Insert the order
   const { data: order, error: orderError } = await serverClient
     .from('orders')
     .insert({
-      buyer_id: buyerId,
+      buyer_id:  buyerId,
       seller_id: listing.seller_id,
       listing_id: listingId,
-      item_price_cents: itemPriceCents,
+      item_price_cents:    itemPriceCents,
       shipping_cost_cents: shippingCostCents,
-      total_paid_cents: totalPaidCents,
-      status: 'PENDING_PAYMENT',
+      total_paid_cents:    totalPaidCents,
+      status:         'PENDING_PAYMENT',
       payment_status: 'PENDING',
-      shipping_method: selectedQuote.method,
-      service_level_code: selectedQuote.serviceLevelCode,
-      // RULE: Lock the quoted shipping price at order creation — never recalculate
-      quoted_rate_cents: shippingCostCents,
-      estimated_delivery: selectedQuote.estimatedDeliveryTo,
-      // RULE: snapshot buyer's chosen locker at order time for D2L / L2L shipment booking
+      shipping_method:    selectedQuote?.method          ?? null,
+      service_level_code: selectedQuote?.serviceLevelCode ?? null,
+      quoted_rate_cents:  shippingCostCents,
+      estimated_delivery: selectedQuote?.estimatedDeliveryTo ?? null,
       delivery_locker_id:   buyerLockerId   ?? null,
       delivery_locker_name: buyerLockerName ?? null,
     })
@@ -107,12 +127,47 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'order_creation_failed' }, { status: 500 })
   }
 
-  // 6. Append the first order event (RULE: never delete or mutate order history)
+  // 6. Record order_items and mark listing_items as sold (multi-item only)
+  if (purchasedItemIds.length > 0) {
+    const { data: itemPrices } = await serverClient
+      .from('listing_items')
+      .select('id, price_cents')
+      .in('id', purchasedItemIds)
+
+    await serverClient.from('order_items').insert(
+      (itemPrices ?? []).map(i => ({
+        order_id:         order.id,
+        listing_item_id:  i.id,
+        price_at_purchase: i.price_cents,
+      }))
+    )
+
+    // Mark items as sold
+    await serverClient.from('listing_items')
+      .update({ status: 'sold' })
+      .in('id', purchasedItemIds)
+
+    // Update listing's available_count — if 0 remaining, mark listing SOLD
+    const newAvailable = (listing.available_count ?? 0) - purchasedItemIds.length
+    await serverClient.from('listings').update({
+      available_count: Math.max(0, newAvailable),
+      ...(newAvailable <= 0 ? { status: 'SOLD' } : {}),
+    }).eq('id', listingId)
+
+    // Clean up reservations for these items
+    await serverClient.from('reservations')
+      .delete()
+      .in('listing_item_id', purchasedItemIds)
+  }
+
+  // 7. Append the first order event (RULE: never delete or mutate order history)
   await serverClient.from('order_events').insert({
-    order_id: order.id,
+    order_id:    order.id,
     from_status: null,
-    to_status: 'PENDING_PAYMENT',
-    note: 'Order created by buyer',
+    to_status:   'PENDING_PAYMENT',
+    note:        purchasedItemIds.length > 0
+      ? `Order created — ${purchasedItemIds.length} item${purchasedItemIds.length !== 1 ? 's' : ''} selected`
+      : 'Order created by buyer',
     created_by: buyerId,
   })
 

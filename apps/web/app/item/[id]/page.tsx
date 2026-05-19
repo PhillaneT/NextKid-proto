@@ -3,7 +3,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useParams } from 'next/navigation';
-import { Pencil, Trash2, X, Check, Heart, MapPin, ShoppingBag, School as SchoolIcon, Truck, Box, CheckCircle2 } from 'lucide-react';
+import { Pencil, Trash2, X, Check, Heart, MapPin, ShoppingBag, School as SchoolIcon, Truck, Box, CheckCircle2, ShoppingCart } from 'lucide-react';
+import { useCart } from '@/lib/cart';
+import type { SelectedListingItem } from '@/lib/cart';
 import { ALL_CATEGORIES, SUBCATEGORIES, LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES, SCHOOL_SPECIFIC_CATEGORIES, getLockerSizeForParcel, canFitInLocker } from '@nextkid/shared';
 import type { ListingCategory, School, SellerShippingOption, ParcelDimensions } from '@nextkid/shared';
 import LockerMapPicker from '../../components/LockerMapPicker';
@@ -25,6 +27,8 @@ type Item = {
   seller_id: string;
   seller_school_id: string | null;
   is_school_specific: boolean;
+  is_multi_item: boolean;
+  available_count: number;
   size: string | null;
   gender: string | null;
   grade: number | null;
@@ -61,7 +65,11 @@ export default function ItemPage() {
   const router = useRouter();
   const params = useParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const { add, has } = useCart();
+
   const [item, setItem] = useState<Item | null>(null);
+  const [listingItems, setListingItems] = useState<SelectedListingItem[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   const [isOwner, setIsOwner] = useState(false);
@@ -175,6 +183,22 @@ export default function ItemPage() {
     const { data, error } = await supabase.from('listings').select('*').eq('id', id).single();
     if (error) { console.error(error); setLoading(false); return; }
     setItem(data);
+
+    // Load individual items for multi-item listings
+    if (data.is_multi_item) {
+      const { data: items } = await supabase
+        .from('listing_items')
+        .select('id, name, price_cents, size_label')
+        .eq('listing_id', id)
+        .eq('status', 'available')
+        .order('price_cents', { ascending: true });
+      setListingItems((items ?? []).map(i => ({
+        id:          i.id,
+        name:        i.name,
+        price_cents: i.price_cents,
+        size_label:  i.size_label,
+      })));
+    }
     setEditForm({
       title: data.title, category: data.category, subcategory: data.subcategory || '',
       price: String(data.price_cents / 100),
@@ -324,6 +348,29 @@ export default function ItemPage() {
   function handleBuyNow() {
     if (!currentUserId || !item) return;
     router.push(`/checkout/${item.id}`);
+  }
+
+  function toggleItemSelect(itemId: string) {
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      next.has(itemId) ? next.delete(itemId) : next.add(itemId);
+      return next;
+    });
+  }
+
+  function handleAddSelectedToCart() {
+    if (!item || selectedItemIds.size === 0) return;
+    const selected = listingItems.filter(i => selectedItemIds.has(i.id));
+    const total    = selected.reduce((s, i) => s + i.price_cents, 0);
+    add({
+      listingId:     item.id,
+      title:         item.title,
+      price_cents:   total,
+      image:         item.images?.[0] ?? null,
+      sellerId:      item.seller_id,
+      category:      item.category,
+      selectedItems: selected,
+    });
   }
 
   async function toggleLike() {
@@ -743,7 +790,12 @@ export default function ItemPage() {
                   </span>
                 </div>
 
-                <div className="text-4xl font-bold text-[#BE1E2D] mb-6">R{(item.price_cents / 100).toLocaleString()}</div>
+                <div className="text-4xl font-bold text-[#BE1E2D] mb-6">
+                  {item.is_multi_item ? `from R${(item.price_cents / 100).toLocaleString()}` : `R${(item.price_cents / 100).toLocaleString()}`}
+                </div>
+                {item.is_multi_item && item.available_count > 0 && (
+                  <p className="text-sm text-[#979797] -mt-4 mb-6">{item.available_count} item{item.available_count !== 1 ? 's' : ''} available · select below</p>
+                )}
 
                 {/* Buyer actions — shown to all non-owners */}
                 {!isOwner && (
@@ -754,11 +806,61 @@ export default function ItemPage() {
                         <button onClick={() => router.push('/')} className="px-6 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-sm font-medium transition">Sign In</button>
                       </div>
                     )}
-                    {isLoggedIn && (
+                    {isLoggedIn && item.is_multi_item && listingItems.length > 0 && (
+                      <div className="space-y-3 mb-4">
+                        <p className="text-sm font-semibold text-[#111]">
+                          Select the items you want <span className="text-[#979797] font-normal">({item.available_count} available)</span>
+                        </p>
+                        <div className="border border-[#dedede] rounded-2xl overflow-hidden divide-y divide-[#dedede]">
+                          {listingItems.map(li => {
+                            const checked = selectedItemIds.has(li.id);
+                            return (
+                              <button key={li.id} type="button"
+                                onClick={() => toggleItemSelect(li.id)}
+                                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition ${checked ? 'bg-red-50' : 'hover:bg-[#f4f4f4]'}`}
+                              >
+                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition ${checked ? 'bg-[#BE1E2D] border-[#BE1E2D]' : 'border-[#dedede]'}`}>
+                                  {checked && <Check size={12} strokeWidth={3} className="text-white" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm font-medium text-[#111]">{li.name}</span>
+                                  {li.size_label && <span className="text-xs text-[#979797] ml-2">{li.size_label}</span>}
+                                </div>
+                                <span className="text-sm font-bold text-[#BE1E2D] shrink-0">R{(li.price_cents / 100).toFixed(2)}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {selectedItemIds.size > 0 && (
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-sm text-[#979797]">{selectedItemIds.size} item{selectedItemIds.size !== 1 ? 's' : ''} selected</span>
+                            <span className="text-sm font-bold text-[#BE1E2D]">
+                              Total R{(listingItems.filter(i => selectedItemIds.has(i.id)).reduce((s, i) => s + i.price_cents, 0) / 100).toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        {has(item.id) ? (
+                          <button onClick={() => router.push('/cart')}
+                            className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-full transition flex items-center justify-center gap-2">
+                            <Check size={16} strokeWidth={2.5} /> Added — View Cart
+                          </button>
+                        ) : (
+                          <button onClick={handleAddSelectedToCart} disabled={selectedItemIds.size === 0}
+                            className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold rounded-full transition flex items-center justify-center gap-2">
+                            <ShoppingCart size={16} strokeWidth={2} />
+                            {selectedItemIds.size === 0 ? 'Select items above' : `Add ${selectedItemIds.size} item${selectedItemIds.size !== 1 ? 's' : ''} to cart`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {isLoggedIn && !item.is_multi_item && (
                       <button onClick={handleBuyNow}
                         className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] text-white font-semibold rounded-full transition">
                         ⚡ Buy Now — R{(item.price_cents / 100).toLocaleString()}
                       </button>
+                    )}
+                    {isLoggedIn && item.is_multi_item && listingItems.length === 0 && (
+                      <div className="w-full py-4 text-center text-[#979797] text-sm bg-[#f4f4f4] rounded-full">All items sold</div>
                     )}
                   </div>
                 )}

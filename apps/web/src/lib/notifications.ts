@@ -39,6 +39,24 @@ const STATUS_MESSAGES: Record<string, {
   buyer?: { push: string; email: { subject: string; body: string } }
   seller?: { push: string; email: { subject: string; body: string } }
 }> = {
+  // ── Multi-item partial sale ────────────────────────────────────────────────
+  PARTIAL_SALE: {
+    seller: {
+      push: '🛒 Some items from your listing just sold!',
+      email: {
+        subject: 'Items sold — remaining items still listed',
+        body: 'A buyer has purchased some items from your multi-item listing. The unsold items are still active and available for other buyers to purchase.',
+      },
+    },
+    buyer: {
+      push: '🎉 Your selected items are reserved! Complete checkout to confirm.',
+      email: {
+        subject: 'Your selected items — complete your order',
+        body: 'You have selected items from a listing. Your items are reserved for 15 minutes. Please complete checkout before your reservation expires.',
+      },
+    },
+  },
+
   // ── Hub fulfilment flow ────────────────────────────────────────────────────
   AWAITING_DROPOFF: {
     buyer: {

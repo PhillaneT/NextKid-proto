@@ -75,6 +75,18 @@ export default function SellScreen() {
   const [grade, setGrade]             = useState('');
   const [description, setDescription] = useState('');
 
+  // Step 3 — multi-item support
+  type ItemDraft = { key: string; name: string; price: string; size_label: string }
+  const [isMultiItem, setIsMultiItem] = useState(false);
+  const [draftItems, setDraftItems]   = useState<ItemDraft[]>([
+    { key: Math.random().toString(36), name: '', price: '', size_label: '' },
+  ]);
+  const addDraftItem    = () => setDraftItems(p => [...p, { key: Math.random().toString(36), name: '', price: '', size_label: '' }]);
+  const removeDraftItem = (key: string) => setDraftItems(p => p.filter(i => i.key !== key));
+  const updateDraftItem = (key: string, field: keyof ItemDraft, value: string) =>
+    setDraftItems(p => p.map(i => i.key === key ? { ...i, [field]: value } : i));
+  const validItems = draftItems.filter(i => i.name.trim() && parseFloat(i.price) > 0);
+
   // Step 4 — parcel dimensions + shipping methods
   const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
   const [shippingMethods, setShippingMethods] = useState<SellerShippingOption[]>([]);
@@ -133,13 +145,21 @@ export default function SellScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!title || !price) { Alert.alert('Missing fields', 'Title and price are required.'); return; }
+    if (!title) { Alert.alert('Missing fields', 'Title is required.'); return; }
+    if (!isMultiItem && !price) { Alert.alert('Missing fields', 'Price is required.'); return; }
+    if (isMultiItem && validItems.length === 0) { Alert.alert('Missing items', 'Add at least one item with a name and price.'); return; }
     if (!parcelComplete || !shippingComplete) {
       Alert.alert('Incomplete', 'Please fill in parcel dimensions and select at least one shipping method.');
       return;
     }
-    const priceCents = Math.round(parseFloat(price) * 100);
-    if (isNaN(priceCents) || priceCents <= 0) { Alert.alert('Invalid price', 'Enter a valid price.'); return; }
+
+    const priceCents = isMultiItem
+      ? Math.round(Math.min(...validItems.map(i => parseFloat(i.price))) * 100)
+      : Math.round(parseFloat(price) * 100);
+
+    if (!isMultiItem && (isNaN(priceCents) || priceCents <= 0)) {
+      Alert.alert('Invalid price', 'Enter a valid price.'); return;
+    }
 
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -151,7 +171,7 @@ export default function SellScreen() {
 
     // RULE: condition stored uppercase to match DB check constraint
     // RULE: price stored in cents — Stitch processes ZAR in cents natively
-    const { error } = await supabase.from('listings').insert({
+    const { data: newListing, error } = await supabase.from('listings').insert({
       seller_id:            user.id,
       title:                title.trim(),
       description:          description.trim() || null,
@@ -163,7 +183,6 @@ export default function SellScreen() {
       status:               'ACTIVE',
       published_at:         new Date().toISOString(),
 
-      // Seller location snapshot
       seller_province_code: prof?.province ?? null,
       seller_city_id:       prof?.city_id ?? null,
       seller_city_name:     prof?.city_name ?? null,
@@ -177,18 +196,32 @@ export default function SellScreen() {
       gender:               gender || null,
       grade:                grade ? parseInt(grade) : null,
 
-      // RULE: parcel dimensions required before listing can go ACTIVE
       parcel_length_cm:     parcelDims!.lengthCm,
       parcel_width_cm:      parcelDims!.widthCm,
       parcel_height_cm:     parcelDims!.heightCm,
       parcel_weight_kg:     parcelDims!.weightKg,
-
-      // RULE: at least one shipping method required before listing goes ACTIVE
       shipping_methods:     shippingMethods,
-    });
+
+      is_multi_item:        isMultiItem,
+      item_count:           isMultiItem ? validItems.length : 1,
+      available_count:      isMultiItem ? validItems.length : 1,
+    }).select('id').single();
+
+    if (error || !newListing) { setLoading(false); Alert.alert('Error', error?.message ?? 'Unknown error'); return; }
+
+    if (isMultiItem && validItems.length > 0) {
+      const { error: itemsErr } = await supabase.from('listing_items').insert(
+        validItems.map(i => ({
+          listing_id:  newListing.id,
+          name:        i.name.trim(),
+          price_cents: Math.round(parseFloat(i.price) * 100),
+          size_label:  i.size_label.trim() || null,
+        }))
+      );
+      if (itemsErr) { setLoading(false); Alert.alert('Error saving items', itemsErr.message); return; }
+    }
 
     setLoading(false);
-    if (error) { Alert.alert('Error', error.message); return; }
     setSuccess(true);
   };
 
@@ -412,10 +445,75 @@ export default function SellScreen() {
             );
           })()}
 
-          <Text style={styles.label}>Price (R) *</Text>
-          <TextInput style={styles.input} value={price} onChangeText={setPrice}
-            placeholder="250" placeholderTextColor="#979797" keyboardType="numeric" />
-          {parseFloat(price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(price)} />}
+          {/* Multi-item toggle */}
+          <View style={styles.multiToggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.multiToggleTitle}>Multiple items in this listing?</Text>
+              <Text style={styles.multiToggleSub}>e.g. shoes, shirt and pants — each priced separately</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.toggle, isMultiItem && styles.toggleOn]}
+              onPress={() => setIsMultiItem(v => !v)}
+            >
+              <View style={[styles.toggleThumb, isMultiItem && styles.toggleThumbOn]} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Single item: price + buyer price calculator */}
+          {!isMultiItem && (
+            <>
+              <Text style={styles.label}>Price (R) *</Text>
+              <TextInput style={styles.input} value={price} onChangeText={setPrice}
+                placeholder="250" placeholderTextColor="#979797" keyboardType="numeric" />
+              {parseFloat(price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(price)} />}
+            </>
+          )}
+
+          {/* Multi-item: per-item list */}
+          {isMultiItem && (
+            <>
+              <Text style={styles.label}>Items in this listing <Text style={{ color: '#979797', fontWeight: '400' }}>(at least 1)</Text></Text>
+              {draftItems.map((item, idx) => (
+                <View key={item.key} style={styles.itemCard}>
+                  <View style={styles.itemCardHeader}>
+                    <Text style={styles.itemCardNum}>Item {idx + 1}</Text>
+                    {draftItems.length > 1 && (
+                      <TouchableOpacity onPress={() => removeDraftItem(item.key)} hitSlop={8}>
+                        <Text style={{ color: '#979797', fontSize: 18, lineHeight: 20 }}>×</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <Text style={styles.label}>Name *</Text>
+                  <TextInput style={styles.input} value={item.name}
+                    onChangeText={v => updateDraftItem(item.key, 'name', v)}
+                    placeholder="e.g. Grey school trousers" placeholderTextColor="#979797" />
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Price (R) *</Text>
+                      <TextInput style={styles.input} value={item.price}
+                        onChangeText={v => updateDraftItem(item.key, 'price', v)}
+                        placeholder="80" placeholderTextColor="#979797" keyboardType="numeric" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Size <Text style={{ color: '#979797', fontWeight: '400' }}>(optional)</Text></Text>
+                      <TextInput style={styles.input} value={item.size_label}
+                        onChangeText={v => updateDraftItem(item.key, 'size_label', v)}
+                        placeholder="e.g. Size 32" placeholderTextColor="#979797" />
+                    </View>
+                  </View>
+                </View>
+              ))}
+              <TouchableOpacity style={styles.addItemBtn} onPress={addDraftItem}>
+                <Text style={styles.addItemBtnText}>+ Add another item</Text>
+              </TouchableOpacity>
+              {validItems.length > 0 && (
+                <View style={styles.itemsSummary}>
+                  <Text style={styles.itemsSummaryText}>{validItems.length} item{validItems.length !== 1 ? 's' : ''} · from R{Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}</Text>
+                  <Text style={styles.itemsSummaryTotal}>Total R{validItems.reduce((s, i) => s + parseFloat(i.price), 0).toFixed(2)}</Text>
+                </View>
+              )}
+            </>
+          )}
 
           <Text style={styles.label}>Description</Text>
           <TextInput style={[styles.input, { height: 90, textAlignVertical: 'top' }]}
@@ -426,8 +524,10 @@ export default function SellScreen() {
             <TouchableOpacity style={[styles.btn, styles.btnOutline, { flex: 1 }]} onPress={prevStep}>
               <Text style={styles.btnOutlineText}>← Back</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, (!title || !price) && styles.btnDisabled, { flex: 2 }]}
-              onPress={nextStep} disabled={!title || !price}>
+            <TouchableOpacity
+              style={[styles.btn, (!title || (isMultiItem ? validItems.length === 0 : !price)) && styles.btnDisabled, { flex: 2 }]}
+              onPress={nextStep}
+              disabled={!title || (isMultiItem ? validItems.length === 0 : !price)}>
               <Text style={styles.btnText}>Continue →</Text>
             </TouchableOpacity>
           </View>
@@ -537,7 +637,10 @@ export default function SellScreen() {
             <SummaryRow label="Category"  value={category} />
             {selectedSchool && <SummaryRow label="School" value={selectedSchool.name} />}
             <SummaryRow label="Title"     value={title} />
-            <SummaryRow label="Price"     value={`R${price}`} />
+            {isMultiItem
+              ? <SummaryRow label="Items" value={`${validItems.length} items · from R${Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}`} />
+              : <SummaryRow label="Price" value={`R${price}`} />
+            }
             {subcategory && <SummaryRow label="Subcategory" value={subcategory} />}
             <SummaryRow label="Condition" value={condition.replace(/_/g, ' ')} />
             {size   && <SummaryRow label="Size"   value={size} />}
@@ -686,6 +789,25 @@ const styles = StyleSheet.create({
   successBox:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   successTitle:       { color: '#111', fontSize: 26, fontWeight: '800', marginBottom: 8 },
   successSub:         { color: '#979797', fontSize: 14, marginBottom: 32, textAlign: 'center' },
+
+  // Multi-item toggle
+  multiToggleRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, backgroundColor: SURF, borderRadius: 14, borderWidth: 1, borderColor: BORDER, marginBottom: 4 },
+  multiToggleTitle: { color: '#111', fontSize: 13, fontWeight: '600', marginBottom: 2 },
+  multiToggleSub:   { color: '#979797', fontSize: 11, lineHeight: 16 },
+  toggle:           { width: 44, height: 24, borderRadius: 12, backgroundColor: BORDER, justifyContent: 'center', paddingHorizontal: 3, flexShrink: 0 },
+  toggleOn:         { backgroundColor: BLUE },
+  toggleThumb:      { width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
+  toggleThumbOn:    { alignSelf: 'flex-end' },
+
+  // Per-item cards
+  itemCard:       { borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14, marginBottom: 10, backgroundColor: '#fff' },
+  itemCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  itemCardNum:    { color: '#979797', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+  addItemBtn:     { borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: BLUE, borderRadius: 14, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
+  addItemBtnText: { color: BLUE, fontSize: 13, fontWeight: '600' },
+  itemsSummary:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: SURF, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  itemsSummaryText:  { color: '#979797', fontSize: 12 },
+  itemsSummaryTotal: { color: BLUE, fontSize: 14, fontWeight: '700' },
 
   // Buyer price widget
   priceWidget:           { marginTop: 10, marginBottom: 8, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: SURF, overflow: 'hidden' },

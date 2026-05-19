@@ -86,6 +86,18 @@ export default function NewListingPage() {
     description: '',
   });
 
+  // Step 3 — multi-item support
+  type ListingItemDraft = { key: string; name: string; price: string; size_label: string }
+  const [isMultiItem, setIsMultiItem] = useState(false);
+  const [draftItems, setDraftItems]   = useState<ListingItemDraft[]>([
+    { key: crypto.randomUUID(), name: '', price: '', size_label: '' },
+  ]);
+  const addDraftItem  = () => setDraftItems(prev => [...prev, { key: crypto.randomUUID(), name: '', price: '', size_label: '' }]);
+  const removeDraftItem = (key: string) => setDraftItems(prev => prev.filter(i => i.key !== key));
+  const updateDraftItem = (key: string, field: keyof ListingItemDraft, value: string) =>
+    setDraftItems(prev => prev.map(i => i.key === key ? { ...i, [field]: value } : i));
+  const validItems = draftItems.filter(i => i.name.trim() && parseFloat(i.price) > 0);
+
   // Step 4 — parcel dimensions + shipping methods
   const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
   const [shippingMethods, setShippingMethods] = useState<SellerShippingOption[]>([]);
@@ -195,12 +207,17 @@ export default function NewListingPage() {
       .eq('id', user.id).single();
 
     // RULE: condition stored uppercase to match DB check constraint
-    const { error: insertError } = await supabase.from('listings').insert({
+    // For multi-item listings price_cents = minimum item price (used for "from R X" display)
+    const priceCents = isMultiItem
+      ? Math.round(Math.min(...validItems.map(i => parseFloat(i.price))) * 100)
+      : Math.round(parseFloat(form.price) * 100);
+
+    const { data: newListing, error: insertError } = await supabase.from('listings').insert({
       seller_id:            user.id,
       title:                form.title,
       description:          form.description || null,
       // RULE: price stored in cents — Stitch processes ZAR in cents natively
-      price_cents:          Math.round(parseFloat(form.price) * 100),
+      price_cents:          priceCents,
       condition:            form.condition.toUpperCase(),
       category,
       subcategory:          form.subcategory || null,
@@ -236,10 +253,37 @@ export default function NewListingPage() {
       // RULE: if PUDO_DROPOFF selected, seller's chosen drop-off locker is required and stored here
       pudo_locker_id:       pudoLockerId   || null,
       pudo_locker_name:     pudoLockerName || null,
-    });
+
+      // Multi-item fields
+      is_multi_item:        isMultiItem,
+      item_count:           isMultiItem ? validItems.length : 1,
+      available_count:      isMultiItem ? validItems.length : 1,
+    }).select('id').single();
+
+    if (insertError || !newListing) {
+      setLoading(false);
+      setError('Error: ' + (insertError?.message ?? 'Unknown error'));
+      return;
+    }
+
+    // Insert listing_items for multi-item listings
+    if (isMultiItem && validItems.length > 0) {
+      const { error: itemsError } = await supabase.from('listing_items').insert(
+        validItems.map(i => ({
+          listing_id:  newListing.id,
+          name:        i.name.trim(),
+          price_cents: Math.round(parseFloat(i.price) * 100),
+          size_label:  i.size_label.trim() || null,
+        }))
+      );
+      if (itemsError) {
+        setLoading(false);
+        setError('Items saved but listing_items failed: ' + itemsError.message);
+        return;
+      }
+    }
 
     setLoading(false);
-    if (insertError) { setError('Error: ' + insertError.message); return; }
     setShowSuccess(true);
   };
 
@@ -491,24 +535,90 @@ export default function NewListingPage() {
               );
             })()}
 
-            <div>
-              <label className={labelCls}>Your asking price (Rands)</label>
-              <input type="number" className={inputCls} value={form.price}
-                onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" min="10" />
-              {/* Buyer price calculator */}
-              {parseFloat(form.price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(form.price)} />}
+            {/* ── Multi-item toggle ── */}
+            <div className="flex items-center justify-between p-4 bg-[#f4f4f4] rounded-2xl border border-[#dedede]">
+              <div>
+                <p className="text-sm font-semibold text-[#111]">Multiple items in this listing?</p>
+                <p className="text-xs text-[#979797] mt-0.5">e.g. a bag with shoes, shirts and pants — each priced separately</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMultiItem(v => !v)}
+                className={`relative w-11 h-6 rounded-full transition ${isMultiItem ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`}
+              >
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${isMultiItem ? 'left-6' : 'left-1'}`} />
+              </button>
             </div>
+
+            {/* Single item: price + buyer price widget */}
+            {!isMultiItem && (
+              <div>
+                <label className={labelCls}>Your asking price (Rands)</label>
+                <input type="number" className={inputCls} value={form.price}
+                  onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" min="10" />
+                {parseFloat(form.price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(form.price)} />}
+              </div>
+            )}
+
+            {/* Multi-item: per-item list */}
+            {isMultiItem && (
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-[#111]">Items in this listing <span className="text-[#979797] font-normal">(add at least 1)</span></p>
+                {draftItems.map((item, idx) => (
+                  <div key={item.key} className="border border-[#dedede] rounded-2xl p-4 space-y-3 relative">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold text-[#979797] uppercase tracking-wide">Item {idx + 1}</span>
+                      {draftItems.length > 1 && (
+                        <button type="button" onClick={() => removeDraftItem(item.key)}
+                          className="text-[#979797] hover:text-red-500 transition text-lg leading-none">×</button>
+                      )}
+                    </div>
+                    <div>
+                      <label className={labelCls}>Item name *</label>
+                      <input className={inputCls} value={item.name}
+                        onChange={e => updateDraftItem(item.key, 'name', e.target.value)}
+                        placeholder="e.g. Grey school trousers" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={labelCls}>Price (R) *</label>
+                        <input type="number" className={inputCls} value={item.price}
+                          onChange={e => updateDraftItem(item.key, 'price', e.target.value)}
+                          placeholder="80" min="1" />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Size <span className="text-[#979797]">(optional)</span></label>
+                        <input className={inputCls} value={item.size_label}
+                          onChange={e => updateDraftItem(item.key, 'size_label', e.target.value)}
+                          placeholder="e.g. Size 32, L" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <button type="button" onClick={addDraftItem}
+                  className="w-full py-2.5 border border-dashed border-[#BE1E2D] text-[#BE1E2D] rounded-2xl text-sm font-medium hover:bg-red-50 transition">
+                  + Add another item
+                </button>
+                {validItems.length > 0 && (
+                  <div className="flex justify-between items-center px-4 py-3 bg-[#f4f4f4] rounded-xl">
+                    <span className="text-sm text-[#979797]">{validItems.length} item{validItems.length !== 1 ? 's' : ''} · from R{Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}</span>
+                    <span className="text-sm font-bold text-[#BE1E2D]">Total R{validItems.reduce((s, i) => s + parseFloat(i.price), 0).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <label className={labelCls}>Description</label>
               <textarea className={`${inputCls} h-28 resize-none`} value={form.description}
                 onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder="Describe the item — condition, why you're selling, any defects..." />
+                placeholder="Describe the listing — condition, why you're selling, any defects..." />
             </div>
 
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
-              <button onClick={nextStep} disabled={!form.title || !form.price}
+              <button onClick={nextStep}
+                disabled={!form.title || (isMultiItem ? validItems.length === 0 : !form.price)}
                 className="flex-grow py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 Continue →
               </button>

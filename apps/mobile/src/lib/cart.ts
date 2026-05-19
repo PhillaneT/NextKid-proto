@@ -5,14 +5,22 @@
 import { useState, useEffect, useCallback } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 
-export interface CartItem {
-  listingId: string
-  title:     string
+export interface SelectedListingItem {
+  id:          string
+  name:        string
   price_cents: number
-  image:     string | null
-  sellerId:  string
-  category:  string
-  size?:     string | null
+  size_label:  string | null
+}
+
+export interface CartItem {
+  listingId:   string
+  title:       string
+  price_cents: number
+  image:       string | null
+  sellerId:    string
+  category:    string
+  size?:       string | null
+  selectedItems?: SelectedListingItem[]
 }
 
 const KEY = 'nextkid_cart'

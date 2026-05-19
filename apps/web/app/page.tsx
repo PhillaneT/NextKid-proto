@@ -61,7 +61,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div>
           <div className="leading-none mb-2">
-            <img src="/logo.png" alt="NextKid" style={{ height: '72px', width: 'auto' }} />
+            <img src="/logo.png" alt="NextKid" style={{ height: '144px', width: 'auto' }} />
           </div>
           <p style={{ letterSpacing: '0.22em', fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', fontWeight: 500, textTransform: 'uppercase', marginBottom: '28px' }}>
             Wear.&nbsp; Grow.&nbsp; Repeat.
@@ -108,7 +108,7 @@ export default function LoginPage() {
 
           {/* Mobile logo */}
           <div className="md:hidden mb-8 flex justify-center">
-            <img src="/logo.png" alt="NextKid" style={{ height: '52px', width: 'auto' }} />
+            <img src="/logo.png" alt="NextKid" style={{ height: '104px', width: 'auto' }} />
           </div>
 
           <h1 className="text-2xl font-bold text-[#111] mb-1">

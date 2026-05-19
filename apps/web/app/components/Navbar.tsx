@@ -40,7 +40,7 @@ export default function Navbar() {
 
         {/* Logo */}
         <a href="/dashboard" className="shrink-0">
-          <img src="/logo.png" alt="NextKid" height={44} style={{ height: '44px', width: 'auto' }} />
+          <img src="/logo.png" alt="NextKid" height={88} style={{ height: '88px', width: 'auto' }} />
         </a>
 
         {/* Pill search bar */}

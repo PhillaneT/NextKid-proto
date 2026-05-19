@@ -232,7 +232,7 @@ async function sendEmail(to: string, subject: string, body: string, name: string
         html: `
           <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px">
             <div style="background:#3A3A3A;padding:16px 24px;border-radius:12px 12px 0 0">
-              <img src="${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/logo.png" alt="NextKid" style="height:40px;width:auto" />
+              <img src="${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/logo.png" alt="NextKid" style="height:80px;width:auto" />
             </div>
             <div style="background:#fff;border:1px solid #dedede;border-top:none;padding:28px;border-radius:0 0 12px 12px">
               <p style="color:#979797;font-size:13px;margin:0 0 4px">Hi ${name},</p>

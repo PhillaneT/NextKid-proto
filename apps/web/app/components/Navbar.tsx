@@ -4,29 +4,42 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCart } from '@/lib/cart';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, ScanLine } from 'lucide-react';
 
-const AUTH_HIDDEN = ['/', '/onboarding'];
+const AUTH_HIDDEN    = ['/', '/onboarding'];
+const NAV_HIDDEN_PFX = ['/klerebank'];  // Hub Mode has its own header
 
 export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
   const [search, setSearch] = useState('');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn,   setIsLoggedIn]   = useState(false);
+  const [isHubAdmin,   setIsHubAdmin]   = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setIsLoggedIn(!!user);
-    });
+    async function check(userId: string | undefined) {
+      setIsLoggedIn(!!userId);
+      if (!userId) { setIsHubAdmin(false); return; }
+      const { data } = await supabase
+        .from('school_admins')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('active', true)
+        .limit(1)
+        .single();
+      setIsHubAdmin(!!data);
+    }
+    supabase.auth.getUser().then(({ data: { user } }) => check(user?.id));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      setIsLoggedIn(!!session?.user);
+      check(session?.user?.id);
     });
     return () => subscription.unsubscribe();
   }, []);
 
   if (AUTH_HIDDEN.includes(pathname)) return null;
+  if (NAV_HIDDEN_PFX.some(p => pathname.startsWith(p))) return null;
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (search.trim()) router.push(`/browse?q=${encodeURIComponent(search.trim())}`);
   };
@@ -71,6 +84,17 @@ export default function Navbar() {
             <NavTab label="Profile" active={isActive('/profile')} onClick={() => router.push('/profile')} />
           )}
         </nav>
+
+        {/* Hub Mode button — only visible to active Klerebank Admins */}
+        {isHubAdmin && !pathname.startsWith('/klerebank') && (
+          <button
+            onClick={() => router.push('/klerebank')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-xs font-bold transition shrink-0"
+          >
+            <ScanLine size={13} strokeWidth={2.5} />
+            Hub Mode
+          </button>
+        )}
 
         {/* Cart icon */}
         {isLoggedIn && (

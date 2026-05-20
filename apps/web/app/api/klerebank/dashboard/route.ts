@@ -1,0 +1,123 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
+
+// GET /api/klerebank/dashboard
+//
+// Returns waybill-only operational data for a verified Klerebank Admin.
+// RULE: Zero PII returned — no buyer names, seller names, item details or prices.
+// The admin sees only: waybill number, status, timing, and their own earnings.
+
+export async function GET(req: NextRequest) {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  const anonClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+  const { data: userData } = await anonClient.auth.getUser(token)
+  if (!userData.user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  const server = createServerSupabaseClient()
+
+  // Verify Klerebank Admin role
+  const { data: adminRow } = await server
+    .from('school_admins')
+    .select('school_id, schools(name, city_name)')
+    .eq('user_id', userData.user.id)
+    .eq('active', true)
+    .single()
+
+  if (!adminRow) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+
+  const schoolId   = adminRow.school_id
+  const schoolName = (adminRow.schools as any)?.name    ?? 'Your school'
+  const cityName   = (adminRow.schools as any)?.city_name ?? ''
+
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+
+  // RULE: join only to get waybill + timing — never select buyer_id, seller_id, listing details
+  // Incoming: seller must bring item in (AWAITING_DROPOFF)
+  const { data: incoming } = await server
+    .from('orders')
+    .select(`
+      id,
+      status,
+      auto_dropoff_at,
+      created_at,
+      waybills ( waybill_number )
+    `)
+    .eq('status', 'AWAITING_DROPOFF')
+    .in('listing_id',
+      server.from('listings').select('id').eq('seller_school_id', schoolId)
+    )
+    .order('auto_dropoff_at', { ascending: true })
+    .limit(50)
+
+  // At hub: waiting for buyer to collect (ITEM_AT_HUB)
+  const { data: atHub } = await server
+    .from('orders')
+    .select(`
+      id,
+      status,
+      dropped_off_at,
+      waybills ( waybill_number )
+    `)
+    .eq('status', 'ITEM_AT_HUB')
+    .in('listing_id',
+      server.from('listings').select('id').eq('seller_school_id', schoolId)
+    )
+    .order('dropped_off_at', { ascending: false })
+    .limit(50)
+
+  // Completed today
+  const { count: completedToday } = await server
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'COMPLETED')
+    .gte('collected_at', todayStart.toISOString())
+    .in('listing_id',
+      server.from('listings').select('id').eq('seller_school_id', schoolId)
+    )
+
+  // Admin's earnings this month from school_ledger
+  const monthStart = new Date()
+  monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
+
+  const { data: ledger } = await server
+    .from('school_ledger')
+    .select('amount_cents, event_type, created_at')
+    .eq('admin_id', userData.user.id)
+    .gte('created_at', monthStart.toISOString())
+
+  const earningsThisMonth = (ledger ?? []).reduce((s, r) => s + r.amount_cents, 0)
+  const collectionsThisMonth = (ledger ?? []).filter(r => r.event_type === 'collection').length
+
+  // Format — only waybill-safe fields
+  const formatIncoming = (rows: typeof incoming) => (rows ?? []).map(o => ({
+    orderId:       o.id,
+    waybillNumber: (o.waybills as any)?.waybill_number ?? '—',
+    status:        o.status,
+    dueBy:         o.auto_dropoff_at,
+    receivedAt:    o.created_at,
+  }))
+
+  const formatAtHub = (rows: typeof atHub) => (rows ?? []).map(o => ({
+    orderId:       o.id,
+    waybillNumber: (o.waybills as any)?.waybill_number ?? '—',
+    status:        o.status,
+    droppedOffAt:  o.dropped_off_at,
+  }))
+
+  return NextResponse.json({
+    schoolName,
+    cityName,
+    incoming:            formatIncoming(incoming),
+    atHub:               formatAtHub(atHub),
+    completedToday:      completedToday ?? 0,
+    earningsThisMonth,
+    collectionsThisMonth,
+  })
+}

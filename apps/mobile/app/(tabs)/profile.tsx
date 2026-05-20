@@ -491,6 +491,11 @@ export default function ProfileScreen() {
                 <Text style={styles.scanBtnText}>📷 Scan QR</Text>
               </TouchableOpacity>
             )}
+            {profile?.role === 'admin' && profile?.admin_verified && (
+              <TouchableOpacity style={[styles.scanBtn, { backgroundColor: '#111' }]} onPress={() => router.push('/klerebank' as never)}>
+                <Text style={[styles.scanBtnText, { color: '#fff' }]}>🏫 Hub Mode</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.signOutBtn} onPress={signOut}>
               <Text style={styles.signOutText}>Sign out</Text>
             </TouchableOpacity>

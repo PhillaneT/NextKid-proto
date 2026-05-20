@@ -38,7 +38,47 @@ interface Profile {
 const STATUS_MESSAGES: Record<string, {
   buyer?: { push: string; email: { subject: string; body: string } }
   seller?: { push: string; email: { subject: string; body: string } }
+  hubAdmin?: { push: string }
 }> = {
+  // ── Klerebank Hub Admin alerts ─────────────────────────────────────────────
+  AWAITING_DROPOFF: {
+    hubAdmin: {
+      push: '📦 Heads up — expecting {{waybill}}. Drop-off due by {{date}}.',
+    },
+    buyer: {
+      push: '💳 Payment secured! Waiting for the seller to bring your item to a Klerebank hub.',
+      email: {
+        subject: 'Payment confirmed — seller is bringing your item to Klerebank',
+        body: 'Your payment has been secured in escrow. The seller has 3 business days to drop your item off at a Klerebank hub. You\'ll receive your collection QR once the item is confirmed at the hub.',
+      },
+    },
+    seller: {
+      push: '📦 New order! Drop your item off at a Klerebank hub within 3 business days.',
+      email: {
+        subject: 'New order — drop off your item at Klerebank within 3 days',
+        body: 'A buyer has paid for your item and the funds are held in escrow. Please bring the item to your nearest Klerebank hub within 3 business days. Use the Drop-Off QR in your order details — the admin will scan it to confirm receipt.',
+      },
+    },
+  },
+  ITEM_AT_HUB: {
+    buyer: {
+      push: '🎉 Your item is at the Klerebank hub and ready to collect! Open the app for your QR.',
+      email: {
+        subject: 'Your item is ready to collect at Klerebank',
+        body: 'Great news — the seller has dropped off your item and it\'s been confirmed at the Klerebank hub. Open the app to get your Collection QR, then visit any Klerebank location to collect your item. Your QR is valid for 14 days.',
+      },
+    },
+    seller: {
+      push: '✅ Item received at Klerebank hub. Payment will be released once the buyer collects.',
+      email: {
+        subject: 'Item confirmed at Klerebank — waiting for buyer to collect',
+        body: 'Your item has been received and confirmed at the Klerebank hub. The buyer has been notified and sent their collection QR. Once they collect, your payment (minus platform commission) will be released automatically.',
+      },
+    },
+    hubAdmin: {
+      push: '✅ {{waybill}} collected and closed. Your R10 has been added to this month.',
+    },
+  },
   // ── Multi-item partial sale ────────────────────────────────────────────────
   PARTIAL_SALE: {
     seller: {

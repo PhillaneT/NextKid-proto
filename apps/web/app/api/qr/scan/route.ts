@@ -140,6 +140,21 @@ export async function POST(req: NextRequest) {
       created_by:  adminId,
     })
 
+    // Audit log
+    await server.from('order_status_log').insert({
+      order_id: order.id, status: 'ITEM_AT_HUB', changed_by_user_id: adminId,
+    })
+
+    // Credit admin R10 for processing this drop-off
+    const { data: adminSchool } = await server
+      .from('school_admins').select('school_id').eq('user_id', adminId).eq('active', true).single()
+    if (adminSchool) {
+      await server.from('school_ledger').upsert({
+        school_id: adminSchool.school_id, order_id: order.id,
+        admin_id: adminId, event_type: 'dropoff', amount_cents: 1000,
+      }, { onConflict: 'order_id,event_type', ignoreDuplicates: true })
+    }
+
     // Generate COLLECTION QR and store it — buyer can now come collect
     const collectionQr = generateQrToken(
       'COLLECTION',
@@ -192,6 +207,21 @@ export async function POST(req: NextRequest) {
       note:        'Collection QR scanned by Klerebank admin — buyer collected item, funds released to seller',
       created_by:  adminId,
     })
+
+    // Audit log
+    await server.from('order_status_log').insert({
+      order_id: order.id, status: 'COMPLETED', changed_by_user_id: adminId,
+    })
+
+    // Credit admin R10 for processing this collection
+    const { data: adminSchool2 } = await server
+      .from('school_admins').select('school_id').eq('user_id', adminId).eq('active', true).single()
+    if (adminSchool2) {
+      await server.from('school_ledger').upsert({
+        school_id: adminSchool2.school_id, order_id: order.id,
+        admin_id: adminId, event_type: 'collection', amount_cents: 1000,
+      }, { onConflict: 'order_id,event_type', ignoreDuplicates: true })
+    }
 
     // Notify both parties (fire-and-forget)
     sendOrderNotification({ orderId: order.id, newStatus: 'COMPLETED', triggeredBy: 'admin' })

@@ -503,12 +503,12 @@ export default function NewListingPage() {
 
             {/* Context-aware fields — subcategory drives the size picker */}
             {(() => {
-              const fields  = CATEGORY_FIELDS[category] ?? {};
+              const fields   = CATEGORY_FIELDS[category] ?? {};
               const sizeType = SUBCATEGORY_SIZE_TYPE[form.subcategory] ?? null;
               return (
                 <>
-                  {/* Size — switches based on subcategory selection */}
-                  {(sizeType === 'clothing') && (
+                  {/* Size + gender — only shown once a subcategory is chosen */}
+                  {sizeType === 'clothing' && (
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className={labelCls}>Clothing Size <span className="text-[#979797] font-normal">(SA sizing)</span></label>
@@ -553,32 +553,33 @@ export default function NewListingPage() {
                     </div>
                   )}
                   {(sizeType === 'shoe' || fields.shoeSize) && (
-                    <div>
-                      <label className={labelCls}>Shoe Size <span className="text-[#979797] font-normal">(UK sizing — used in SA)</span></label>
-                      <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
-                        <option value="">Select size...</option>
-                        <optgroup label="Children">
-                          {['10C','11C','12C','13C'].map(s => <option key={s} value={s}>{s}</option>)}
-                        </optgroup>
-                        <optgroup label="Youth">
-                          {['1','2','3','4','5'].map(s => <option key={s} value={s}>{s}</option>)}
-                        </optgroup>
-                        <optgroup label="Adult">
-                          {['6','7','8','9','10','11','12','13'].map(s => <option key={s} value={s}>{s}</option>)}
-                        </optgroup>
-                      </select>
-                    </div>
-                  )}
-                  {/* Always show gender when category needs it — even for Hats, Ties, Socks */}
-                  {fields.gender && sizeType === 'none' && (
-                    <div>
-                      <label className={labelCls}>Gender</label>
-                      <select className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as typeof form.gender })}>
-                        <option value="">Select...</option>
-                        <option value="boys">Boys</option>
-                        <option value="girls">Girls</option>
-                        <option value="unisex">Unisex</option>
-                      </select>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>Shoe Size <span className="text-[#979797] font-normal">(UK sizing — used in SA)</span></label>
+                        <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
+                          <option value="">Select size...</option>
+                          <optgroup label="Children">
+                            {['10C','11C','12C','13C'].map(s => <option key={s} value={s}>{s}</option>)}
+                          </optgroup>
+                          <optgroup label="Youth">
+                            {['1','2','3','4','5'].map(s => <option key={s} value={s}>{s}</option>)}
+                          </optgroup>
+                          <optgroup label="Adult">
+                            {['6','7','8','9','10','11','12','13'].map(s => <option key={s} value={s}>{s}</option>)}
+                          </optgroup>
+                        </select>
+                      </div>
+                      {fields.gender && (
+                        <div>
+                          <label className={labelCls}>Gender</label>
+                          <select className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as typeof form.gender })}>
+                            <option value="">Select...</option>
+                            <option value="boys">Boys</option>
+                            <option value="girls">Girls</option>
+                            <option value="unisex">Unisex</option>
+                          </select>
+                        </div>
+                      )}
                     </div>
                   )}
                   {fields.dimensions && !sizeType && (

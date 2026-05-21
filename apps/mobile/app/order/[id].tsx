@@ -166,7 +166,7 @@ function DemoPayForm({ order, onPaid }: { order: Order; onPaid: () => void }) {
 
         <View style={styles.escrowNote}>
           <ShieldCheck size={12} strokeWidth={2} color="#979797" />
-          <Text style={styles.escrowText}>Funds held in escrow · Released after you confirm receipt</Text>
+          <Text style={styles.escrowText}>Funds held safely · Released after you confirm receipt</Text>
         </View>
       </View>
     </View>
@@ -464,7 +464,7 @@ export default function OrderDetailScreen() {
           <View style={styles.infoBox}>
             <ShieldCheck size={18} strokeWidth={1.5} color="#2563eb" />
             <View style={{ flex: 1 }}>
-              <Text style={styles.infoTitle}>Payment held in escrow</Text>
+              <Text style={styles.infoTitle}>Payment held safely</Text>
               <Text style={styles.infoText}>
                 Your {fmt(order.total_paid_cents)} is locked safely. The seller must drop the item at a Klerebank hub within 3 days. You'll get your collection QR once it's confirmed.
               </Text>
@@ -498,7 +498,7 @@ export default function OrderDetailScreen() {
           <View style={styles.infoBox}>
             <ShieldCheck size={18} strokeWidth={1.5} color="#2563eb" />
             <View style={{ flex: 1 }}>
-              <Text style={styles.infoTitle}>Payment held in escrow</Text>
+              <Text style={styles.infoTitle}>Payment held safely</Text>
               <Text style={styles.infoText}>
                 Your {fmt(order.total_paid_cents)} is locked safely. The seller has been notified and must ship within 3 business days.
               </Text>

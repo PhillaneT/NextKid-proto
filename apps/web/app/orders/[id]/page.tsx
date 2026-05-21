@@ -216,7 +216,7 @@ function DemoPaymentForm({
           <p className="text-xs font-semibold text-amber-700">Demo mode — test payment</p>
           <p className="text-xs text-amber-600 mt-0.5">
             Card details are pre-filled with Stitch test credentials.
-            No real money will be charged. Real Stitch escrow payment will replace this.
+            No real money will be charged. Real Stitch payment will replace this.
           </p>
         </div>
       </div>
@@ -307,7 +307,7 @@ function DemoPaymentForm({
 
         <div className="flex items-center justify-center gap-1.5 pt-1">
           <ShieldCheck size={13} strokeWidth={2} className="text-[#979797]" />
-          <p className="text-xs text-[#979797]">Funds held in escrow · Released only after you confirm receipt</p>
+          <p className="text-xs text-[#979797]">Funds held safely · Released only after you confirm receipt</p>
         </div>
       </div>
     </div>
@@ -533,7 +533,7 @@ export default function OrderDetailPage() {
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 flex gap-3">
             <ShieldCheck size={20} strokeWidth={1.5} className="text-blue-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-semibold text-blue-800">Payment held in escrow</p>
+              <p className="text-sm font-semibold text-blue-800">Payment held safely</p>
               <p className="text-xs text-blue-600 mt-1">
                 Your {fmt(order.total_paid_cents)} is locked safely. The seller has been notified
                 and must drop the item off at a Klerebank hub within 3 business days.
@@ -570,7 +570,7 @@ export default function OrderDetailPage() {
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 flex gap-3">
             <ShieldCheck size={20} strokeWidth={1.5} className="text-blue-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-semibold text-blue-800">Payment held in escrow</p>
+              <p className="text-sm font-semibold text-blue-800">Payment held safely</p>
               <p className="text-xs text-blue-600 mt-1">
                 Your {fmt(order.total_paid_cents)} is locked safely. The seller has been notified and
                 must ship within 3 business days. You'll be notified when it ships.

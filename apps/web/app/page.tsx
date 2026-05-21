@@ -87,7 +87,7 @@ export default function LoginPage() {
           <div className="flex flex-col gap-3.5">
             {[
               { icon: School,  label: 'School-specific listings near you' },
-              { icon: Lock,    label: 'Escrow payments — funds held safely until delivery' },
+              { icon: Lock,    label: 'Funds held safely until delivery' },
               { icon: Package, label: 'Tracked shipping on every order' },
               { icon: Users,   label: 'Trusted community of parents and students' },
             ].map(({ icon: Icon, label }) => (

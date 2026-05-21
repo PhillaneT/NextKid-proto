@@ -48,7 +48,7 @@ export default function Navbar() {
   const { count } = useCart();
 
   return (
-    <header className="sticky top-0 z-50 bg-white border-b border-[#dedede]">
+    <header className="sticky top-0 z-50 bg-[#6B6B6B]">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-6">
 
         {/* Logo */}
@@ -59,14 +59,14 @@ export default function Navbar() {
         {/* Pill search bar */}
         <form onSubmit={handleSearch} className="flex-1 max-w-xl">
           <div className="relative">
-            <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-[#979797] w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50 w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
             </svg>
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search for school items..."
-              className="w-full bg-[#f4f4f4] rounded-full pl-10 pr-4 py-2.5 text-sm text-[#111] placeholder-[#979797] outline-none focus:ring-2 focus:ring-[#BE1E2D]/30 transition"
+              className="w-full bg-white/15 rounded-full pl-10 pr-4 py-2.5 text-sm text-white placeholder-white/50 outline-none focus:ring-2 focus:ring-white/30 transition"
             />
           </div>
         </form>
@@ -85,7 +85,7 @@ export default function Navbar() {
           )}
         </nav>
 
-        {/* Hub Mode button — only visible to active Klerebank Admins */}
+        {/* Hub Mode button */}
         {isHubAdmin && !pathname.startsWith('/klerebank') && (
           <button
             onClick={() => router.push('/klerebank')}
@@ -100,7 +100,7 @@ export default function Navbar() {
         {isLoggedIn && (
           <button
             onClick={() => router.push('/cart')}
-            className="relative shrink-0 p-2 text-[#979797] hover:text-[#BE1E2D] transition"
+            className="relative shrink-0 p-2 text-white/70 hover:text-white transition"
           >
             <ShoppingCart size={22} strokeWidth={2} />
             {count > 0 && (
@@ -122,7 +122,7 @@ export default function Navbar() {
         ) : (
           <button
             onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}
-            className="shrink-0 px-5 py-2 text-sm font-medium rounded-full border border-[#dedede] text-[#111] hover:bg-[#f4f4f4] transition"
+            className="shrink-0 px-5 py-2 text-sm font-medium rounded-full border border-white/30 text-white hover:bg-white/10 transition"
           >
             Sign out
           </button>
@@ -136,7 +136,7 @@ function NavTab({ label, active, onClick }: { label: string; active: boolean; on
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium relative transition ${active ? 'text-[#BE1E2D]' : 'text-[#979797] hover:text-[#111]'}`}
+      className={`px-4 py-2 text-sm font-medium relative transition ${active ? 'text-white' : 'text-white/60 hover:text-white'}`}
     >
       {label}
       {active && (

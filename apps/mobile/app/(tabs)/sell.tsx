@@ -474,7 +474,7 @@ export default function SellScreen() {
                   <TextInput style={styles.input} value={size} onChangeText={setSize}
                     placeholder="e.g. 42L, 30×20×10 cm" placeholderTextColor="#979797" />
                 </>}
-                {fields.gender && sizeType !== 'none' && <>
+                {fields.gender && <>
                   <Text style={styles.label}>Gender</Text>
                   <View style={styles.chipRow}>
                     {(['boys', 'girls', 'unisex'] as const).map(g => (

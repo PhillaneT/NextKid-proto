@@ -569,7 +569,18 @@ export default function NewListingPage() {
                       </select>
                     </div>
                   )}
-                  {/* No size picker for subcategories like Hats, Ties, Socks */}
+                  {/* Always show gender when category needs it — even for Hats, Ties, Socks */}
+                  {fields.gender && sizeType === 'none' && (
+                    <div>
+                      <label className={labelCls}>Gender</label>
+                      <select className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as typeof form.gender })}>
+                        <option value="">Select...</option>
+                        <option value="boys">Boys</option>
+                        <option value="girls">Girls</option>
+                        <option value="unisex">Unisex</option>
+                      </select>
+                    </div>
+                  )}
                   {fields.dimensions && !sizeType && (
                     <div>
                       <label className={labelCls}>Dimensions / Capacity</label>

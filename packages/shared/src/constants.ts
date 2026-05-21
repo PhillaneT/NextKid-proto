@@ -36,7 +36,7 @@ export const CATEGORY_EMOJI: Record<ListingCategory, string> = {
 };
 
 export const SUBCATEGORIES: Record<ListingCategory, string[]> = {
-  'School Uniforms': ['Tops & Shirts', 'Bottoms', 'Dresses & Tunics', 'Blazers & Jackets', 'Jerseys & Hoodies', 'Ties & Accessories', 'Hats & Caps', 'Socks'],
+  'School Uniforms': ['Tops & Shirts', 'Pants & Shorts', 'Skirts & Tunics', 'Dresses', 'Blazers & Jackets', 'Jerseys & Hoodies', 'Shoes', 'Ties & Accessories', 'Hats & Caps', 'Socks'],
   'School Sports Kit': ['Rugby', 'Soccer', 'Cricket', 'Hockey', 'Swimming', 'Athletics', 'Netball', 'Tennis', 'Other Sport'],
   'Shoes': ['Black School Shoes', 'PT / Takkies', 'Rugby Boots', 'Soccer Boots', 'Cricket Shoes', 'Hockey Shoes', 'Running Shoes', 'Other'],
   'Sports Equipment': ['Rackets & Bats', 'Balls', 'Protective Gear', 'Swimming Gear', 'Bags & Holdalls', 'Other'],
@@ -61,6 +61,56 @@ export const SA_PROVINCES = [
 ] as const;
 // SaProvince is exported from types.ts — do not re-export here
 
-export const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '4', '6', '8', '10', '12', '14', '16', '18', '20'] as const;
-export const SHOE_SIZES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'] as const;
+// SA school clothing sizes — age-based (children) then adult letter sizes
+export const CLOTHING_SIZES = [
+  '4', '6', '8', '10', '12', '14', '16', '18', '20',
+  'XS', 'S', 'M', 'L', 'XL', 'XXL',
+] as const;
+
+// SA waist sizes for pants, shorts and skirts (inches)
+export const BOTTOM_SIZES = [
+  '20"', '22"', '24"', '26"', '28"', '30"', '32"', '34"', '36"', '38"',
+] as const;
+
+// SA shoe sizes — UK system (used in South Africa)
+// Children: 10C–13C → Youth: 1–5 → Adult: 6–13
+export const SHOE_SIZES = [
+  '10C', '11C', '12C', '13C',
+  '1', '2', '3', '4', '5',
+  '6', '7', '8', '9', '10', '11', '12', '13',
+] as const;
+
 export const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
+// Maps each subcategory to the right size picker.
+// 'clothing' = tops/dresses, 'bottom' = waist/pants, 'shoe' = shoe sizes, 'none' = no size
+export const SUBCATEGORY_SIZE_TYPE: Record<string, 'clothing' | 'bottom' | 'shoe' | 'none'> = {
+  // School Uniforms
+  'Tops & Shirts':      'clothing',
+  'Pants & Shorts':     'bottom',
+  'Skirts & Tunics':    'bottom',
+  'Dresses':            'clothing',
+  'Blazers & Jackets':  'clothing',
+  'Jerseys & Hoodies':  'clothing',
+  'Shoes':              'shoe',
+  'Ties & Accessories': 'none',
+  'Hats & Caps':        'none',
+  'Socks':              'none',
+  // School Sports Kit
+  'Rugby':              'clothing',
+  'Soccer':             'clothing',
+  'Cricket':            'clothing',
+  'Hockey':             'clothing',
+  'Swimming':           'clothing',
+  'Athletics':          'clothing',
+  'Netball':            'clothing',
+  'Tennis':             'clothing',
+  // Shoes category
+  'Black School Shoes': 'shoe',
+  'PT / Takkies':       'shoe',
+  'Rugby Boots':        'shoe',
+  'Soccer Boots':       'shoe',
+  'Cricket Shoes':      'shoe',
+  'Hockey Shoes':       'shoe',
+  'Running Shoes':      'shoe',
+};

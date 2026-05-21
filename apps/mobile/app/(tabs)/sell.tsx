@@ -11,7 +11,8 @@ import {
 } from 'lucide-react-native';
 import {
   ALL_CATEGORIES, SCHOOL_SPECIFIC_CATEGORIES, SUBCATEGORIES,
-  LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES,
+  LISTING_CONDITIONS, CLOTHING_SIZES, BOTTOM_SIZES,
+  SUBCATEGORY_SIZE_TYPE, GRADES, SA_PROVINCES,
   canFitInLocker, getLockerSizeForParcel,
   calculateBuyerPrice, fmtRands,
 } from '@nextkid/shared';
@@ -412,13 +413,15 @@ export default function SellScreen() {
             ))}
           </View>
 
-          {/* Context-aware fields */}
+          {/* Context-aware fields — subcategory drives the size picker */}
           {(() => {
-            const fields = CATEGORY_FIELDS[category] ?? {};
+            const fields   = CATEGORY_FIELDS[category] ?? {};
+            const sizeType = SUBCATEGORY_SIZE_TYPE[subcategory] ?? null;
             return (
               <>
-                {fields.clothingSize && <>
-                  <Text style={styles.label}>Clothing Size</Text>
+                {/* Clothing size — tops, dresses, blazers, sport kits */}
+                {sizeType === 'clothing' && <>
+                  <Text style={styles.label}>Clothing Size <Text style={{ color: '#979797', fontWeight: '400' }}>(SA sizing)</Text></Text>
                   <View style={styles.chipRow}>
                     {CLOTHING_SIZES.map(s => (
                       <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
@@ -427,22 +430,51 @@ export default function SellScreen() {
                     ))}
                   </View>
                 </>}
-                {fields.shoeSize && <>
-                  <Text style={styles.label}>Shoe Size</Text>
+                {/* Waist size — pants, shorts, skirts */}
+                {sizeType === 'bottom' && <>
+                  <Text style={styles.label}>Waist Size</Text>
                   <View style={styles.chipRow}>
-                    {SHOE_SIZES.map(s => (
+                    {BOTTOM_SIZES.map(s => (
                       <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
                         <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </>}
-                {fields.dimensions && <>
+                {/* Shoe size — SA UK sizing */}
+                {(sizeType === 'shoe' || fields.shoeSize) && <>
+                  <Text style={styles.label}>Shoe Size <Text style={{ color: '#979797', fontWeight: '400' }}>(UK — used in SA)</Text></Text>
+                  <Text style={[styles.label, { color: '#979797', fontSize: 10, marginTop: -4 }]}>Children</Text>
+                  <View style={styles.chipRow}>
+                    {['10C','11C','12C','13C'].map(s => (
+                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
+                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={[styles.label, { color: '#979797', fontSize: 10, marginTop: 4 }]}>Youth</Text>
+                  <View style={styles.chipRow}>
+                    {['1','2','3','4','5'].map(s => (
+                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
+                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={[styles.label, { color: '#979797', fontSize: 10, marginTop: 4 }]}>Adult</Text>
+                  <View style={styles.chipRow}>
+                    {['6','7','8','9','10','11','12','13'].map(s => (
+                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
+                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>}
+                {fields.dimensions && !sizeType && <>
                   <Text style={styles.label}>Dimensions / Capacity</Text>
                   <TextInput style={styles.input} value={size} onChangeText={setSize}
                     placeholder="e.g. 42L, 30×20×10 cm" placeholderTextColor="#979797" />
                 </>}
-                {fields.gender && <>
+                {fields.gender && sizeType !== 'none' && <>
                   <Text style={styles.label}>Gender</Text>
                   <View style={styles.chipRow}>
                     {(['boys', 'girls', 'unisex'] as const).map(g => (

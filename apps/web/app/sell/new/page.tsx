@@ -9,7 +9,8 @@ import {
 } from 'lucide-react';
 import {
   ALL_CATEGORIES, SCHOOL_SPECIFIC_CATEGORIES, SUBCATEGORIES,
-  LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES,
+  LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, BOTTOM_SIZES,
+  SUBCATEGORY_SIZE_TYPE, GRADES, SA_PROVINCES,
   canFitInLocker, getLockerSizeForParcel,
   calculateBuyerPrice, fmtRands,
 } from '@nextkid/shared';
@@ -500,22 +501,22 @@ export default function NewListingPage() {
               </div>
             </div>
 
-            {/* Context-aware fields — only shown for relevant categories */}
+            {/* Context-aware fields — subcategory drives the size picker */}
             {(() => {
-              const fields = CATEGORY_FIELDS[category] ?? {};
+              const fields  = CATEGORY_FIELDS[category] ?? {};
+              const sizeType = SUBCATEGORY_SIZE_TYPE[form.subcategory] ?? null;
               return (
                 <>
-                  {(fields.clothingSize || fields.gender) && (
+                  {/* Size — switches based on subcategory selection */}
+                  {(sizeType === 'clothing') && (
                     <div className="grid grid-cols-2 gap-4">
-                      {fields.clothingSize && (
-                        <div>
-                          <label className={labelCls}>Clothing Size</label>
-                          <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
-                            <option value="">Select size...</option>
-                            {CLOTHING_SIZES.map(s => <option key={s}>{s}</option>)}
-                          </select>
-                        </div>
-                      )}
+                      <div>
+                        <label className={labelCls}>Clothing Size <span className="text-[#979797] font-normal">(SA sizing)</span></label>
+                        <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
+                          <option value="">Select size...</option>
+                          {CLOTHING_SIZES.map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      </div>
                       {fields.gender && (
                         <div>
                           <label className={labelCls}>Gender</label>
@@ -529,16 +530,47 @@ export default function NewListingPage() {
                       )}
                     </div>
                   )}
-                  {fields.shoeSize && (
+                  {sizeType === 'bottom' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>Waist Size</label>
+                        <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
+                          <option value="">Select waist...</option>
+                          {BOTTOM_SIZES.map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      {fields.gender && (
+                        <div>
+                          <label className={labelCls}>Gender</label>
+                          <select className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as typeof form.gender })}>
+                            <option value="">Select...</option>
+                            <option value="boys">Boys</option>
+                            <option value="girls">Girls</option>
+                            <option value="unisex">Unisex</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {(sizeType === 'shoe' || fields.shoeSize) && (
                     <div>
-                      <label className={labelCls}>Shoe Size</label>
+                      <label className={labelCls}>Shoe Size <span className="text-[#979797] font-normal">(UK sizing — used in SA)</span></label>
                       <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
                         <option value="">Select size...</option>
-                        {SHOE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                        <optgroup label="Children">
+                          {['10C','11C','12C','13C'].map(s => <option key={s} value={s}>{s}</option>)}
+                        </optgroup>
+                        <optgroup label="Youth">
+                          {['1','2','3','4','5'].map(s => <option key={s} value={s}>{s}</option>)}
+                        </optgroup>
+                        <optgroup label="Adult">
+                          {['6','7','8','9','10','11','12','13'].map(s => <option key={s} value={s}>{s}</option>)}
+                        </optgroup>
                       </select>
                     </div>
                   )}
-                  {fields.dimensions && (
+                  {/* No size picker for subcategories like Hats, Ties, Socks */}
+                  {fields.dimensions && !sizeType && (
                     <div>
                       <label className={labelCls}>Dimensions / Capacity</label>
                       <input className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}

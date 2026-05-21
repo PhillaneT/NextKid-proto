@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCart } from '@/lib/cart';
-import { ShoppingCart, ScanLine, MapPin, BadgeCheck, Lock, Package } from 'lucide-react';
+import { ShoppingCart, ScanLine } from 'lucide-react';
 
 const AUTH_HIDDEN    = ['/', '/onboarding'];
 const NAV_HIDDEN_PFX = ['/klerebank'];  // Hub Mode has its own header
@@ -127,24 +127,6 @@ export default function Navbar() {
             Sign out
           </button>
         )}
-      </div>
-
-      {/* Trust bar — light grey strip below the main nav */}
-      <div className="bg-[#f4f4f4] border-t border-[#dedede]">
-        <div className="max-w-7xl mx-auto px-6 py-2 flex flex-wrap items-center gap-6">
-          <span className="flex items-center gap-1.5 text-xs text-[#555]">
-            <MapPin size={11} strokeWidth={2} className="text-[#BE1E2D]" /> South Africa&apos;s school marketplace
-          </span>
-          <span className="flex items-center gap-1.5 text-xs text-[#555]">
-            <BadgeCheck size={11} strokeWidth={2} className="text-[#BE1E2D]" /> Verified sellers
-          </span>
-          <span className="flex items-center gap-1.5 text-xs text-[#555]">
-            <Lock size={11} strokeWidth={2} className="text-[#BE1E2D]" /> Funds held safely
-          </span>
-          <span className="flex items-center gap-1.5 text-xs text-[#555]">
-            <Package size={11} strokeWidth={2} className="text-[#BE1E2D]" /> Real tracking on every order
-          </span>
-        </div>
       </div>
     </header>
   );

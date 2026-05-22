@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
-import { ArrowLeft, Package, Truck, MapPin, Lock, Home } from 'lucide-react-native';
+import { ArrowLeft, Package, Truck, MapPin, Lock, Home, School, CheckCircle2 } from 'lucide-react-native';
 import LockerPicker from '@/src/components/LockerPicker';
 import type { SelectedLocker } from '@/src/components/LockerPicker';
 import { WEB_API_BASE } from '@/src/lib/api';
@@ -63,6 +63,15 @@ export default function CheckoutScreen() {
   const [buyerSuburb,        setBuyerSuburb]        = useState('');
   const [buyerCity,          setBuyerCity]          = useState('');
 
+  // School delivery
+  type SchoolOption = { id: string; name: string; city_name: string };
+  const [schoolMatch,        setSchoolMatch]        = useState(false);
+  const [matchingSchools,    setMatchingSchools]    = useState<SchoolOption[]>([]);
+  const [deliveryType,       setDeliveryType]       = useState<'school' | 'courier'>('courier');
+  const [deliverySchoolId,   setDeliverySchoolId]   = useState<string | null>(null);
+  const [deliverySchoolName, setDeliverySchoolName] = useState<string | null>(null);
+  const SCHOOL_FEE_CENTS = 2000;
+
   useEffect(() => {
     async function load() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -95,7 +104,24 @@ export default function CheckoutScreen() {
         setBuyerLockerAddress(prof.preferred_locker_address ?? '');
       }
 
-      // 3. Fetch shipping quotes from the web API
+      // 3. Check for same-school delivery match
+      try {
+        const matchRes = await fetch(`${WEB_API_BASE}/api/checkout/school-match?listingId=${listingId}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (matchRes.ok) {
+          const matchData = await matchRes.json();
+          if (matchData.match && matchData.hubActive && matchData.schools?.length > 0) {
+            setSchoolMatch(true);
+            setMatchingSchools(matchData.schools);
+            setDeliveryType('school');
+            setDeliverySchoolId(matchData.schools[0].id);
+            setDeliverySchoolName(matchData.schools[0].name);
+          }
+        }
+      } catch { /* non-fatal — fall back to courier */ }
+
+      // 4. Fetch shipping quotes from the web API
       try {
         const res = await fetch(`${WEB_API_BASE}/api/shipping/rates`, {
           method: 'POST',
@@ -121,12 +147,12 @@ export default function CheckoutScreen() {
   }, [listingId]);
 
   const selectedQuote  = quotes.find(q => q.quoteId === selectedId) ?? null;
-  const shippingCents  = selectedQuote ? Math.round(selectedQuote.rate * 100) : 0;
+  const shippingCents  = deliveryType === 'school' ? SCHOOL_FEE_CENTS : (selectedQuote ? Math.round(selectedQuote.rate * 100) : 0);
   const totalCents     = itemPriceCents + shippingCents;
-  const isPudoDelivery = selectedQuote?.method === 'D2L' || selectedQuote?.method === 'L2L';
+  const isPudoDelivery = deliveryType === 'courier' && (selectedQuote?.method === 'D2L' || selectedQuote?.method === 'L2L');
 
   const handleConfirmOrder = async () => {
-    if (!selectedQuote) return;
+    if (deliveryType === 'courier' && !selectedQuote) return;
     if (isPudoDelivery && !buyerLockerId) {
       Alert.alert('Select a locker', 'Please choose a PUDO collection locker for this delivery option.');
       return;
@@ -145,12 +171,14 @@ export default function CheckoutScreen() {
         },
         body: JSON.stringify({
           listingId,
-          selectedQuote: {
-            quoteId:            selectedQuote.quoteId,
-            method:             selectedQuote.method,
-            serviceLevelCode:   selectedQuote.serviceLevelCode,
-            serviceLevelName:   selectedQuote.serviceLevelName,
-            rate:               selectedQuote.rate,
+          deliveryType,
+          deliverySchoolId: deliveryType === 'school' ? deliverySchoolId : null,
+          selectedQuote: deliveryType === 'school' || !selectedQuote ? null : {
+            quoteId:               selectedQuote.quoteId,
+            method:                selectedQuote.method,
+            serviceLevelCode:      selectedQuote.serviceLevelCode,
+            serviceLevelName:      selectedQuote.serviceLevelName,
+            rate:                  selectedQuote.rate,
             estimatedDeliveryFrom: new Date(selectedQuote.estimatedDeliveryFrom).toISOString(),
             estimatedDeliveryTo:   new Date(selectedQuote.estimatedDeliveryTo).toISOString(),
           },
@@ -267,9 +295,74 @@ export default function CheckoutScreen() {
           </View>
         )}
 
-        {/* Shipping options */}
-        <Text style={styles.sectionLabel}>Shipping options</Text>
-        {quotes.length === 0 ? (
+        {/* School delivery option */}
+        {schoolMatch && (
+          <>
+            <Text style={styles.sectionLabel}>Delivery method</Text>
+
+            {/* School delivery card */}
+            <TouchableOpacity
+              style={[styles.quoteCard, deliveryType === 'school' && styles.quoteCardActive]}
+              onPress={() => setDeliveryType('school')}
+            >
+              <View style={styles.quoteRow}>
+                <School size={17} strokeWidth={2} color={deliveryType === 'school' ? CRIMSON : '#979797'} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.quoteMethod, deliveryType === 'school' && { color: CRIMSON }]}>
+                    School drop-off
+                  </Text>
+                  <Text style={styles.quoteMeta}>Collect from {deliverySchoolName}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  <Text style={[styles.quotePrice, deliveryType === 'school' && { color: CRIMSON }]}>R 20.00</Text>
+                  {deliveryType === 'school' && <CheckCircle2 size={14} strokeWidth={2.5} color={CRIMSON} />}
+                </View>
+              </View>
+              {deliveryType === 'school' && matchingSchools.length > 1 && (
+                <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#fecdd3', gap: 6 }}>
+                  <Text style={{ color: '#979797', fontSize: 11 }}>Multiple matching schools — pick one:</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {matchingSchools.map(s => (
+                      <TouchableOpacity key={s.id}
+                        onPress={() => { setDeliverySchoolId(s.id); setDeliverySchoolName(s.name); }}
+                        style={{
+                          paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1,
+                          backgroundColor: deliverySchoolId === s.id ? CRIMSON : '#fff',
+                          borderColor: deliverySchoolId === s.id ? CRIMSON : BORDER,
+                        }}>
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: deliverySchoolId === s.id ? '#fff' : '#111' }}>
+                          {s.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* Courier toggle */}
+            <TouchableOpacity
+              style={[styles.quoteCard, deliveryType === 'courier' && styles.quoteCardActive]}
+              onPress={() => setDeliveryType('courier')}
+            >
+              <View style={styles.quoteRow}>
+                <Truck size={17} strokeWidth={2} color={deliveryType === 'courier' ? CRIMSON : '#979797'} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.quoteMethod, deliveryType === 'courier' && { color: CRIMSON }]}>
+                    Courier delivery
+                  </Text>
+                  <Text style={styles.quoteMeta}>Door-to-door or PUDO locker</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Shipping options — courier quotes */}
+        {(deliveryType === 'courier' || !schoolMatch) && (
+        <Text style={styles.sectionLabel}>{schoolMatch ? 'Courier options' : 'Shipping options'}</Text>
+        )}
+        {(deliveryType === 'courier' || !schoolMatch) && (quotes.length === 0 ? (
           <View style={styles.emptyQuotes}><Text style={styles.emptyQuotesText}>No shipping options available.</Text></View>
         ) : (
           quotes.map(quote => {
@@ -300,7 +393,7 @@ export default function CheckoutScreen() {
               </TouchableOpacity>
             );
           })
-        )}
+        ))}
 
         {/* PUDO locker picker */}
         {isPudoDelivery && buyerSuburb && (

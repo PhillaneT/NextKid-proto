@@ -9,6 +9,52 @@ import {
   COLLECTION_TTL_HOURS,
 } from '@/lib/qr'
 
+// ── Referral earning helper ───────────────────────────────────────────────────
+// L1 referrer earns R2, L2 referrer earns R0.50 — capped at 2 levels.
+
+async function creditReferralEarnings(
+  server:        ReturnType<typeof createServerSupabaseClient>,
+  orderId:       string,
+  waybillNumber: string,
+  sourceSchoolId: string | null,
+) {
+  if (!sourceSchoolId) return
+
+  // Find L1 referrer (the school that referred sourceSchoolId)
+  const { data: source } = await server
+    .from('schools').select('referred_by_school_id').eq('id', sourceSchoolId).single()
+
+  const l1SchoolId = source?.referred_by_school_id
+  if (!l1SchoolId) return
+
+  // Credit R2 to L1
+  await server.from('referral_earnings').upsert({
+    earning_school_id: l1SchoolId,
+    source_school_id:  sourceSchoolId,
+    order_id:          orderId,
+    waybill_number:    waybillNumber,
+    amount_cents:      200,   // R2
+    level:             1,
+  }, { onConflict: 'earning_school_id,order_id,level', ignoreDuplicates: true })
+
+  // Find L2 referrer (the school that referred the L1 school)
+  const { data: l1 } = await server
+    .from('schools').select('referred_by_school_id').eq('id', l1SchoolId).single()
+
+  const l2SchoolId = l1?.referred_by_school_id
+  if (!l2SchoolId) return
+
+  // Credit R0.50 to L2
+  await server.from('referral_earnings').upsert({
+    earning_school_id: l2SchoolId,
+    source_school_id:  sourceSchoolId,
+    order_id:          orderId,
+    waybill_number:    waybillNumber,
+    amount_cents:      50,    // R0.50
+    level:             2,
+  }, { onConflict: 'earning_school_id,order_id,level', ignoreDuplicates: true })
+}
+
 // RULE: Only a verified Klerebank Admin account may call this endpoint.
 // Any failure returns a generic 'invalid_qr' to avoid leaking scan logic.
 
@@ -222,6 +268,11 @@ export async function POST(req: NextRequest) {
         admin_id: adminId, event_type: 'collection', amount_cents: 1000,
       }, { onConflict: 'order_id,event_type', ignoreDuplicates: true })
     }
+
+    // ── Referral earnings: credit R2 (L1) and R0.50 (L2) to referring schools ──
+    // Uses delivery_school_id as the source school for the referral chain
+    creditReferralEarnings(server, order.id, verified.waybillNumber, adminSchool2?.school_id ?? null)
+      .catch(err => console.error('[Referral] Error crediting earnings:', err))
 
     // Notify both parties (fire-and-forget)
     sendOrderNotification({ orderId: order.id, newStatus: 'COMPLETED', triggeredBy: 'admin' })

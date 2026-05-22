@@ -1,14 +1,15 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, RefreshControl,
+  StyleSheet, ActivityIndicator, RefreshControl, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
 import { WEB_API_BASE } from '@/src/lib/api';
 import {
-  ScanLine, Package, Clock, CheckCircle2, Banknote, ArrowRight, RefreshCw,
+  ScanLine, Package, Clock, CheckCircle2, ArrowRight,
+  Share2, TrendingUp, Users,
 } from 'lucide-react-native';
 
 const CRIMSON = '#BE1E2D';
@@ -32,6 +33,24 @@ type Dashboard = {
   collectionsThisMonth: number;
 };
 
+type ReferralData = {
+  referralCode:  string | null;
+  referralLink:  string | null;
+  tier: {
+    name:        string;
+    emoji:       string;
+    directCount: number;
+    nextTier:    string | null;
+    toNextTier:  number;
+  };
+  earnings: {
+    totalCents:     number;
+    thisMonthCents: number;
+    recentEvents:   { level: number; amountCents: number; waybill: string; createdAt: string }[];
+  };
+  referredSchools: { id: string; name: string; city: string; status: string }[];
+};
+
 function fmt(iso: string | null) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -50,6 +69,13 @@ function timeUntil(iso: string | null): string | null {
   if (h < 24) return `${h}h left`;
   return `${Math.floor(h / 24)}d left`;
 }
+
+const TIER_COLOURS: Record<string, { bar: string; text: string }> = {
+  Seedling: { bar: '#22c55e', text: '#4ade80' },
+  Grove:    { bar: '#10b981', text: '#34d399' },
+  Campus:   { bar: '#3b82f6', text: '#60a5fa' },
+  District: { bar: '#a855f7', text: '#c084fc' },
+};
 
 function WaybillRow({ card, type }: { card: WaybillCard; type: 'incoming' | 'atHub' }) {
   const overdue   = type === 'incoming' && !!card.dueBy && new Date(card.dueBy) < new Date();
@@ -78,26 +104,156 @@ function WaybillRow({ card, type }: { card: WaybillCard; type: 'incoming' | 'atH
   );
 }
 
+function ReferralTab({ data }: { data: ReferralData }) {
+  const colours = TIER_COLOURS[data.tier.name] ?? TIER_COLOURS.Seedling;
+  const current  = data.tier.directCount;
+  const total    = current + data.tier.toNextTier;
+  const pct      = data.tier.nextTier && total > 0 ? Math.min(1, current / total) : 1;
+
+  const shareLink = async () => {
+    if (!data.referralLink) return;
+    await Share.share({
+      message: `Join the NextKid Klerebank network! ${data.referralLink}`,
+      url:     data.referralLink,
+    });
+  };
+
+  return (
+    <View style={{ gap: 14 }}>
+
+      {/* Tier card */}
+      <View style={styles.refCard}>
+        <Text style={styles.refCardLabel}>YOUR TIER</Text>
+        <View style={styles.tierRow}>
+          <Text style={{ fontSize: 32 }}>{data.tier.emoji}</Text>
+          <Text style={[styles.tierName, { color: colours.text }]}>{data.tier.name}</Text>
+          <View style={{ flex: 1 }} />
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={styles.refCardLabel}>DIRECT REFERRALS</Text>
+            <Text style={[styles.tierCount, { color: colours.text }]}>{current}</Text>
+          </View>
+        </View>
+
+        {data.tier.nextTier ? (
+          <>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${pct * 100}%` as any, backgroundColor: colours.bar }]} />
+            </View>
+            <Text style={styles.progressLabel}>
+              {data.tier.toNextTier} more to <Text style={{ color: '#fff', fontWeight: '700' }}>{data.tier.nextTier}</Text>
+            </Text>
+          </>
+        ) : (
+          <Text style={[styles.progressLabel, { color: colours.text }]}>Maximum tier — legendary!</Text>
+        )}
+      </View>
+
+      {/* Earnings */}
+      <View style={styles.refCard}>
+        <View style={styles.refCardRow}>
+          <TrendingUp size={14} color={CRIMSON} strokeWidth={2} />
+          <Text style={styles.refCardTitle}>Referral earnings</Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 20, marginTop: 12 }}>
+          <View>
+            <Text style={styles.refCardLabel}>THIS MONTH</Text>
+            <Text style={styles.earningValue}>{fmtRands(data.earnings.thisMonthCents)}</Text>
+          </View>
+          <View>
+            <Text style={styles.refCardLabel}>ALL TIME</Text>
+            <Text style={styles.earningValue}>{fmtRands(data.earnings.totalCents)}</Text>
+          </View>
+        </View>
+
+        {data.earnings.recentEvents.slice(0, 5).map((e, i) => (
+          <View key={i} style={styles.earningRow}>
+            <Text style={styles.earningLevel}>L{e.level}</Text>
+            <Text style={styles.earningWaybill} numberOfLines={1}>{e.waybill}</Text>
+            <Text style={styles.earningAmount}>+{fmtRands(e.amountCents)}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Share */}
+      {data.referralCode && (
+        <View style={styles.refCard}>
+          <View style={styles.refCardRow}>
+            <Share2 size={14} color={CRIMSON} strokeWidth={2} />
+            <Text style={styles.refCardTitle}>Grow your network</Text>
+          </View>
+          <Text style={styles.shareDesc}>
+            Earn R2 per waybill from schools you refer (L1) and R0.50 from their referrals (L2).
+          </Text>
+
+          <Text style={styles.refCardLabel}>YOUR CODE</Text>
+          <View style={styles.codeBox}>
+            <Text style={styles.codeText}>{data.referralCode}</Text>
+          </View>
+
+          {data.referralLink && (
+            <TouchableOpacity style={styles.shareBtn} onPress={shareLink}>
+              <Share2 size={16} color="#fff" strokeWidth={2} />
+              <Text style={styles.shareBtnText}>Share referral link</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* Referred schools */}
+      {data.referredSchools.length > 0 && (
+        <View style={[styles.section, { backgroundColor: 'rgba(255,255,255,0.06)' }]}>
+          <View style={styles.sectionHeader}>
+            <Users size={14} strokeWidth={2} color={CRIMSON} />
+            <Text style={[styles.sectionTitle, { color: '#fff' }]}>Schools in your network</Text>
+            <Text style={styles.sectionCount}>{data.referredSchools.length}</Text>
+          </View>
+          {data.referredSchools.slice(0, 8).map(s => (
+            <View key={s.id} style={styles.schoolRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.schoolRowName} numberOfLines={1}>{s.name}</Text>
+                <Text style={styles.schoolRowCity}>{s.city}</Text>
+              </View>
+              <View style={[styles.tag, s.status === 'active' ? styles.tagGreen : { backgroundColor: 'rgba(255,255,255,0.08)' }]}>
+                <Text style={[styles.tagText, { color: s.status === 'active' ? '#166534' : 'rgba(255,255,255,0.4)' }]}>
+                  {s.status === 'active' ? 'Active' : 'Pending'}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function KlerebankScreen() {
   const router = useRouter();
-  const [data,      setData]      = useState<Dashboard | null>(null);
-  const [loading,   setLoading]   = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error,     setError]     = useState('');
+  const [data,         setData]         = useState<Dashboard | null>(null);
+  const [referralData, setReferralData] = useState<ReferralData | null>(null);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [error,        setError]        = useState('');
+  const [activeTab,    setActiveTab]    = useState<'waybills' | 'referrals'>('waybills');
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.replace('/' as never); return; }
 
-    const res = await fetch(`${WEB_API_BASE}/api/klerebank/dashboard`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
+    const token   = session.access_token;
+    const headers = { Authorization: `Bearer ${token}` };
 
-    if (res.status === 403) { router.replace('/(tabs)' as never); return; }
-    if (!res.ok) { setError('Could not load dashboard'); setLoading(false); setRefreshing(false); return; }
+    const [dashRes, refRes] = await Promise.all([
+      fetch(`${WEB_API_BASE}/api/klerebank/dashboard`, { headers }),
+      fetch(`${WEB_API_BASE}/api/klerebank/referrals`,  { headers }),
+    ]);
 
-    setData(await res.json());
+    if (dashRes.status === 403) { router.replace('/(tabs)' as never); return; }
+    if (!dashRes.ok) { setError('Could not load dashboard'); setLoading(false); setRefreshing(false); return; }
+
+    const [dashJson, refJson] = await Promise.all([dashRes.json(), refRes.ok ? refRes.json() : null]);
+    setData(dashJson);
+    if (refJson) setReferralData(refJson);
     setLoading(false);
     setRefreshing(false);
   }, []);
@@ -162,35 +318,61 @@ export default function KlerebankScreen() {
           <Text style={styles.scanBtnText}>Scan QR Code</Text>
         </TouchableOpacity>
 
-        {/* Incoming */}
-        {data.incoming.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Clock size={14} strokeWidth={2} color="#fbbf24" />
-              <Text style={styles.sectionTitle}>Expecting drop-offs</Text>
-              <Text style={styles.sectionCount}>{data.incoming.length}</Text>
-            </View>
-            {data.incoming.map(c => <WaybillRow key={c.orderId} card={c} type="incoming" />)}
-          </View>
+        {/* Tabs */}
+        <View style={styles.tabBar}>
+          {(['waybills', 'referrals'] as const).map(tab => (
+            <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.tabActive]}
+              onPress={() => setActiveTab(tab)}>
+              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+                {tab === 'waybills' ? 'Waybills' : `Referrals ${referralData ? referralData.tier.emoji : ''}`}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Waybills tab */}
+        {activeTab === 'waybills' && (
+          <>
+            {data.incoming.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Clock size={14} strokeWidth={2} color="#fbbf24" />
+                  <Text style={styles.sectionTitle}>Expecting drop-offs</Text>
+                  <Text style={styles.sectionCount}>{data.incoming.length}</Text>
+                </View>
+                {data.incoming.map(c => <WaybillRow key={c.orderId} card={c} type="incoming" />)}
+              </View>
+            )}
+
+            {data.atHub.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Package size={14} strokeWidth={2} color="#60a5fa" />
+                  <Text style={styles.sectionTitle}>Held — awaiting collection</Text>
+                  <Text style={styles.sectionCount}>{data.atHub.length}</Text>
+                </View>
+                {data.atHub.map(c => <WaybillRow key={c.orderId} card={c} type="atHub" />)}
+              </View>
+            )}
+
+            {totalActive === 0 && (
+              <View style={styles.emptyCard}>
+                <CheckCircle2 size={36} strokeWidth={1.5} color="rgba(255,255,255,0.15)" />
+                <Text style={styles.emptyText}>All clear — no active waybills</Text>
+              </View>
+            )}
+          </>
         )}
 
-        {/* At hub */}
-        {data.atHub.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Package size={14} strokeWidth={2} color="#60a5fa" />
-              <Text style={styles.sectionTitle}>Held — awaiting collection</Text>
-              <Text style={styles.sectionCount}>{data.atHub.length}</Text>
-            </View>
-            {data.atHub.map(c => <WaybillRow key={c.orderId} card={c} type="atHub" />)}
-          </View>
-        )}
-
-        {totalActive === 0 && (
-          <View style={styles.emptyCard}>
-            <CheckCircle2 size={36} strokeWidth={1.5} color="rgba(255,255,255,0.15)" />
-            <Text style={styles.emptyText}>All clear — no active waybills</Text>
-          </View>
+        {/* Referrals tab */}
+        {activeTab === 'referrals' && (
+          referralData
+            ? <ReferralTab data={referralData} />
+            : (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyText}>Referral data unavailable</Text>
+              </View>
+            )
         )}
 
       </ScrollView>
@@ -220,6 +402,12 @@ const styles = StyleSheet.create({
   scanBtn:     { backgroundColor: CRIMSON, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 18 },
   scanBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
 
+  tabBar:        { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, padding: 4, gap: 4 },
+  tab:           { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 9 },
+  tabActive:     { backgroundColor: '#fff' },
+  tabText:       { color: 'rgba(255,255,255,0.4)', fontSize: 13, fontWeight: '600' },
+  tabTextActive: { color: DARK },
+
   section:       { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f4f4f4' },
   sectionTitle:  { flex: 1, color: DARK, fontSize: 13, fontWeight: '600' },
@@ -242,4 +430,34 @@ const styles = StyleSheet.create({
 
   emptyCard: { backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, padding: 40, alignItems: 'center', gap: 10 },
   emptyText: { color: 'rgba(255,255,255,0.3)', fontSize: 13 },
+
+  // Referral styles
+  refCard:      { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 16, padding: 16, gap: 10 },
+  refCardLabel: { color: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  refCardTitle: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
+  refCardRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
+
+  tierRow:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  tierName:  { fontSize: 22, fontWeight: '800' },
+  tierCount: { fontSize: 28, fontWeight: '800' },
+
+  progressTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' },
+  progressFill:  { height: '100%', borderRadius: 3 },
+  progressLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11 },
+
+  earningValue:  { color: '#fff', fontSize: 22, fontWeight: '800', marginTop: 2 },
+  earningRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  earningLevel:  { color: 'rgba(255,255,255,0.3)', fontSize: 11, width: 18 },
+  earningWaybill:{ color: 'rgba(255,255,255,0.45)', fontSize: 11, flex: 1, fontFamily: 'monospace' },
+  earningAmount: { color: '#4ade80', fontSize: 12, fontWeight: '700' },
+
+  shareDesc: { color: 'rgba(255,255,255,0.35)', fontSize: 11, lineHeight: 16 },
+  codeBox:   { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: 12, alignItems: 'center' },
+  codeText:  { color: '#fff', fontSize: 18, fontWeight: '800', letterSpacing: 3, fontFamily: 'monospace' },
+  shareBtn:  { backgroundColor: CRIMSON, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, marginTop: 4 },
+  shareBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+
+  schoolRow:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', gap: 10 },
+  schoolRowName: { color: '#fff', fontSize: 13, fontWeight: '500' },
+  schoolRowCity: { color: 'rgba(255,255,255,0.3)', fontSize: 11 },
 });

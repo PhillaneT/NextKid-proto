@@ -4,11 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
-  QrCode, Package, CheckCircle2, Clock, AlertTriangle,
+  Package, CheckCircle2, Clock,
   ScanLine, Banknote, RefreshCw, ArrowRight,
+  Share2, Copy, CheckCheck, TrendingUp, Users,
 } from 'lucide-react';
-
-const CRIMSON = '#BE1E2D';
 
 type WaybillCard = {
   orderId:      string;
@@ -27,6 +26,24 @@ type Dashboard = {
   completedToday:      number;
   earningsThisMonth:   number;
   collectionsThisMonth: number;
+};
+
+type ReferralData = {
+  referralCode:  string | null;
+  referralLink:  string | null;
+  tier: {
+    name:        string;
+    emoji:       string;
+    directCount: number;
+    nextTier:    string | null;
+    toNextTier:  number;
+  };
+  earnings: {
+    totalCents:     number;
+    thisMonthCents: number;
+    recentEvents:   { level: number; amountCents: number; waybill: string; createdAt: string }[];
+  };
+  referredSchools: { id: string; name: string; city: string; status: string }[];
 };
 
 function fmtDate(iso: string | null) {
@@ -76,32 +93,206 @@ function WaybillRow({ card, type }: { card: WaybillCard; type: 'incoming' | 'atH
   );
 }
 
+const TIER_COLOURS: Record<string, { bg: string; text: string; bar: string }> = {
+  Seedling: { bg: 'bg-green-500/10',  text: 'text-green-400',  bar: 'bg-green-500' },
+  Grove:    { bg: 'bg-emerald-500/10', text: 'text-emerald-400', bar: 'bg-emerald-500' },
+  Campus:   { bg: 'bg-blue-500/10',   text: 'text-blue-400',   bar: 'bg-blue-500' },
+  District: { bg: 'bg-purple-500/10', text: 'text-purple-400', bar: 'bg-purple-500' },
+};
+
+
+function ReferralCard({ data }: { data: ReferralData }) {
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const colours = TIER_COLOURS[data.tier.name] ?? TIER_COLOURS.Seedling;
+  const current = data.tier.directCount;
+  const pct     = data.tier.nextTier ? Math.min(100, (current / (current + data.tier.toNextTier)) * 100) : 100;
+
+  async function copyCode() {
+    if (!data.referralCode) return;
+    await navigator.clipboard.writeText(data.referralCode);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  }
+
+  async function copyLink() {
+    if (!data.referralLink) return;
+    await navigator.clipboard.writeText(data.referralLink);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  }
+
+  return (
+    <div className="space-y-4">
+
+      {/* Tier badge + progress */}
+      <div className={`${colours.bg} rounded-2xl p-5`}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-white/40 text-xs uppercase tracking-widest mb-1">Your tier</p>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">{data.tier.emoji}</span>
+              <span className={`text-xl font-bold ${colours.text}`}>{data.tier.name}</span>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-white/40 text-xs uppercase tracking-widest mb-1">Direct referrals</p>
+            <p className={`text-2xl font-bold ${colours.text}`}>{current}</p>
+          </div>
+        </div>
+
+        {data.tier.nextTier ? (
+          <>
+            <div className="h-2 bg-white/10 rounded-full overflow-hidden mb-2">
+              <div className={`h-full ${colours.bar} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+            </div>
+            <p className="text-white/40 text-xs">
+              {data.tier.toNextTier} more school{data.tier.toNextTier !== 1 ? 's' : ''} to reach <span className="text-white/70 font-semibold">{data.tier.nextTier}</span>
+            </p>
+          </>
+        ) : (
+          <p className={`text-xs font-semibold ${colours.text}`}>Maximum tier reached — you are a legend!</p>
+        )}
+      </div>
+
+      {/* Referral earnings */}
+      <div className="bg-white/5 rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <TrendingUp size={15} className="text-[#BE1E2D]" />
+          <span className="text-white text-sm font-semibold">Referral earnings</span>
+        </div>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <p className="text-white/40 text-xs uppercase tracking-widest mb-1">This month</p>
+            <p className="text-white text-xl font-bold">{fmtRands(data.earnings.thisMonthCents)}</p>
+          </div>
+          <div>
+            <p className="text-white/40 text-xs uppercase tracking-widest mb-1">All time</p>
+            <p className="text-white text-xl font-bold">{fmtRands(data.earnings.totalCents)}</p>
+          </div>
+        </div>
+
+        {data.earnings.recentEvents.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-white/30 text-xs uppercase tracking-widest">Recent</p>
+            {data.earnings.recentEvents.slice(0, 5).map((e, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-white/30 text-xs">L{e.level}</span>
+                  <span className="text-white/50 text-xs font-mono">{e.waybill}</span>
+                </div>
+                <span className="text-green-400 text-xs font-bold">+{fmtRands(e.amountCents)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Share your code */}
+      {data.referralCode && (
+        <div className="bg-white/5 rounded-2xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Share2 size={15} className="text-[#BE1E2D]" />
+            <span className="text-white text-sm font-semibold">Grow your network</span>
+          </div>
+          <p className="text-white/40 text-xs mb-3">
+            When a school you refer closes a waybill, you earn R2. When their referral closes one, you earn R0.50.
+          </p>
+
+          {/* Code */}
+          <div className="mb-3">
+            <p className="text-white/30 text-xs uppercase tracking-widest mb-1.5">Your referral code</p>
+            <div className="flex items-center gap-2 bg-white/10 rounded-xl px-4 py-3">
+              <span className="flex-1 font-mono font-bold text-white tracking-widest text-sm">{data.referralCode}</span>
+              <button onClick={copyCode}
+                className="text-white/60 hover:text-white transition flex items-center gap-1 text-xs">
+                {codeCopied ? <><CheckCheck size={13} className="text-green-400" /> Copied</> : <><Copy size={13} /> Copy</>}
+              </button>
+            </div>
+          </div>
+
+          {/* Link */}
+          {data.referralLink && (
+            <div>
+              <p className="text-white/30 text-xs uppercase tracking-widest mb-1.5">Shareable link</p>
+              <div className="flex items-center gap-2 bg-white/10 rounded-xl px-4 py-3">
+                <span className="flex-1 text-white/60 text-xs truncate">{data.referralLink}</span>
+                <button onClick={copyLink}
+                  className="text-white/60 hover:text-white transition flex items-center gap-1 text-xs shrink-0">
+                  {linkCopied ? <><CheckCheck size={13} className="text-green-400" /> Copied</> : <><Copy size={13} /> Copy</>}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Referred schools */}
+      {data.referredSchools.length > 0 && (
+        <div className="bg-white/5 rounded-2xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-white/10 flex items-center gap-2">
+            <Users size={15} className="text-[#BE1E2D]" />
+            <span className="text-white text-sm font-semibold">Schools in your network</span>
+            <span className="ml-auto text-white/30 text-xs">{data.referredSchools.length}</span>
+          </div>
+          {data.referredSchools.slice(0, 8).map(s => (
+            <div key={s.id} className="flex items-center px-5 py-3.5 border-b border-white/5 last:border-0">
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-medium truncate">{s.name}</p>
+                <p className="text-white/30 text-xs">{s.city}</p>
+              </div>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                s.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/40'
+              }`}>
+                {s.status === 'active' ? 'Active' : 'Pending'}
+              </span>
+            </div>
+          ))}
+          {data.referredSchools.length > 8 && (
+            <div className="px-5 py-3 text-center text-white/30 text-xs">
+              +{data.referredSchools.length - 8} more schools
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function KlerebankDashboardPage() {
   const router = useRouter();
-  const [data,     setData]     = useState<Dashboard | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState('');
-  const [lastSync, setLastSync] = useState<Date>(new Date());
+  const [data,         setData]         = useState<Dashboard | null>(null);
+  const [referralData, setReferralData] = useState<ReferralData | null>(null);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState('');
+  const [lastSync,     setLastSync]     = useState<Date>(new Date());
+  const [activeTab,    setActiveTab]    = useState<'operations' | 'referrals'>('operations');
 
   const load = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.push('/'); return; }
 
-    const res = await fetch('/api/klerebank/dashboard', {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
+    const token = session.access_token;
+    const headers = { Authorization: `Bearer ${token}` };
 
-    if (res.status === 403) { router.push('/dashboard'); return; }
-    if (!res.ok) { setError('Failed to load dashboard'); setLoading(false); return; }
+    const [dashRes, refRes] = await Promise.all([
+      fetch('/api/klerebank/dashboard', { headers }),
+      fetch('/api/klerebank/referrals',  { headers }),
+    ]);
 
-    setData(await res.json());
+    if (dashRes.status === 403) { router.push('/dashboard'); return; }
+    if (!dashRes.ok) { setError('Failed to load dashboard'); setLoading(false); return; }
+
+    const [dashJson, refJson] = await Promise.all([dashRes.json(), refRes.ok ? refRes.json() : null]);
+    setData(dashJson);
+    if (refJson) setReferralData(refJson);
     setLastSync(new Date());
     setLoading(false);
   }, [router]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh every 60 seconds so new waybills appear without manual refresh
   useEffect(() => {
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
@@ -160,7 +351,7 @@ export default function KlerebankDashboardPage() {
           ))}
         </div>
 
-        {/* Scan button — the primary action */}
+        {/* Scan button */}
         <button
           onClick={() => router.push('/admin/scan' as never)}
           className="w-full flex items-center justify-center gap-3 py-5 bg-[#BE1E2D] hover:bg-[#9B1824] rounded-2xl transition"
@@ -169,39 +360,73 @@ export default function KlerebankDashboardPage() {
           <span className="text-white font-bold text-lg">Scan QR Code</span>
         </button>
 
-        {/* Incoming drop-offs */}
-        {data.incoming.length > 0 && (
-          <div className="bg-white rounded-2xl overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-[#f4f4f4] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock size={15} strokeWidth={2} className="text-amber-500" />
-                <span className="font-semibold text-[#111] text-sm">Expecting drop-offs</span>
+        {/* Tabs */}
+        <div className="flex bg-white/5 rounded-xl p-1 gap-1">
+          {(['operations', 'referrals'] as const).map(tab => (
+            <button key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${
+                activeTab === tab
+                  ? 'bg-white text-[#111]'
+                  : 'text-white/40 hover:text-white/70'
+              }`}>
+              {tab === 'operations' ? 'Waybills' : 'Referrals'}
+              {tab === 'referrals' && referralData && (
+                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-[#BE1E2D] text-white' : 'bg-white/10 text-white/40'}`}>
+                  {referralData.tier.emoji}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Operations tab */}
+        {activeTab === 'operations' && (
+          <>
+            {data.incoming.length > 0 && (
+              <div className="bg-white rounded-2xl overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-[#f4f4f4] flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock size={15} strokeWidth={2} className="text-amber-500" />
+                    <span className="font-semibold text-[#111] text-sm">Expecting drop-offs</span>
+                  </div>
+                  <span className="text-xs text-[#979797]">{data.incoming.length} waybill{data.incoming.length !== 1 ? 's' : ''}</span>
+                </div>
+                {data.incoming.map(c => <WaybillRow key={c.orderId} card={c} type="incoming" />)}
               </div>
-              <span className="text-xs text-[#979797]">{data.incoming.length} waybill{data.incoming.length !== 1 ? 's' : ''}</span>
-            </div>
-            {data.incoming.map(c => <WaybillRow key={c.orderId} card={c} type="incoming" />)}
-          </div>
+            )}
+
+            {data.atHub.length > 0 && (
+              <div className="bg-white rounded-2xl overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-[#f4f4f4] flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Package size={15} strokeWidth={2} className="text-blue-500" />
+                    <span className="font-semibold text-[#111] text-sm">Held at hub — awaiting collection</span>
+                  </div>
+                  <span className="text-xs text-[#979797]">{data.atHub.length} item{data.atHub.length !== 1 ? 's' : ''}</span>
+                </div>
+                {data.atHub.map(c => <WaybillRow key={c.orderId} card={c} type="atHub" />)}
+              </div>
+            )}
+
+            {totalActive === 0 && (
+              <div className="bg-white/5 rounded-2xl px-6 py-10 text-center">
+                <CheckCircle2 size={40} strokeWidth={1.5} className="text-white/20 mx-auto mb-3" />
+                <p className="text-white/40 text-sm">All clear — no active waybills</p>
+              </div>
+            )}
+          </>
         )}
 
-        {/* Items at hub */}
-        {data.atHub.length > 0 && (
-          <div className="bg-white rounded-2xl overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-[#f4f4f4] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Package size={15} strokeWidth={2} className="text-blue-500" />
-                <span className="font-semibold text-[#111] text-sm">Held at hub — awaiting collection</span>
+        {/* Referrals tab */}
+        {activeTab === 'referrals' && (
+          referralData
+            ? <ReferralCard data={referralData} />
+            : (
+              <div className="bg-white/5 rounded-2xl px-6 py-10 text-center">
+                <p className="text-white/40 text-sm">Referral data unavailable</p>
               </div>
-              <span className="text-xs text-[#979797]">{data.atHub.length} item{data.atHub.length !== 1 ? 's' : ''}</span>
-            </div>
-            {data.atHub.map(c => <WaybillRow key={c.orderId} card={c} type="atHub" />)}
-          </div>
-        )}
-
-        {totalActive === 0 && (
-          <div className="bg-white/5 rounded-2xl px-6 py-10 text-center">
-            <CheckCircle2 size={40} strokeWidth={1.5} className="text-white/20 mx-auto mb-3" />
-            <p className="text-white/40 text-sm">All clear — no active waybills</p>
-          </div>
+            )
         )}
 
         {/* Last sync + refresh */}

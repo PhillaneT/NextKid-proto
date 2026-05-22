@@ -1,16 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { CheckCircle2, School, MapPin, Phone, Mail, CreditCard, ChevronRight } from 'lucide-react';
+import { CheckCircle2, School, Phone, Mail, ChevronRight } from 'lucide-react';
 
 const BANKS = ['ABSA', 'Capitec', 'FNB', 'Nedbank', 'Standard Bank', 'African Bank', 'Investec', 'TymeBank'];
 
 type Step = 1 | 2 | 3;
 
 export default function SchoolApplyPage() {
-  const router = useRouter();
+  const router       = useRouter();
+  const searchParams = useSearchParams();
   const [step, setStep] = useState<Step>(1);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -26,7 +27,7 @@ export default function SchoolApplyPage() {
   const [contactName,  setContactName]  = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
-  const [referralCode, setReferralCode] = useState('');
+  const [referralCode, setReferralCode] = useState(searchParams.get('ref') ?? '');
 
   // Step 3 — bank details
   const [bankName,          setBankName]          = useState('');

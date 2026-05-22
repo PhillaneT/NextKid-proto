@@ -10,17 +10,21 @@ const CreateOrderSchema = z.object({
     method: z.enum(['D2D', 'D2L', 'L2D', 'L2L']),
     serviceLevelCode: z.string(),
     serviceLevelName: z.string(),
-    rate: z.number().positive(),       // ZAR float — converted to cents server-side
-    estimatedDeliveryFrom: z.string(), // ISO string
+    rate: z.number().positive(),
+    estimatedDeliveryFrom: z.string(),
     estimatedDeliveryTo: z.string(),
   }).nullable().optional(),
-  // RULE: buyer's chosen PUDO locker — required for D2L and L2L shipments, null otherwise
   buyerLockerId:    z.string().nullable().optional(),
   buyerLockerName:  z.string().nullable().optional(),
-  // Multi-item: which listing_items the buyer selected
   selectedItemIds:  z.array(z.string().uuid()).optional(),
   cartCheckout:     z.boolean().optional(),
+  // School delivery
+  deliveryType:     z.enum(['school', 'courier']).optional(),
+  deliverySchoolId: z.string().nullable().optional(),
 })
+
+const SCHOOL_DELIVERY_FEE_CENTS = 2000  // R20 — matches fee_config.school_delivery_fee
+const SCHOOL_KLEREBANK_SPLIT    = 1000  // R10 → school ledger
 
 export async function POST(req: NextRequest) {
   // 1. Parse and validate body
@@ -35,7 +39,10 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid_body', message: parsed.error.message }, { status: 400 })
   }
-  const { listingId, selectedQuote, buyerLockerId, buyerLockerName, selectedItemIds } = parsed.data
+  const { listingId, selectedQuote, buyerLockerId, buyerLockerName, selectedItemIds,
+          deliveryType, deliverySchoolId } = parsed.data
+
+  const isSchoolDelivery = deliveryType === 'school' && !!deliverySchoolId
 
   // 2. Authenticate the buyer
   const authHeader = req.headers.get('Authorization') ?? ''
@@ -97,27 +104,33 @@ export async function POST(req: NextRequest) {
     purchasedItemIds = items.map(i => i.id)
   }
 
-  const shippingCostCents: number = selectedQuote ? Math.round(selectedQuote.rate * 100) : 0
-  const totalPaidCents: number    = itemPriceCents + shippingCostCents
+  // RULE: School delivery costs R20 flat; courier costs from TCG quote
+  const shippingCostCents: number = isSchoolDelivery
+    ? SCHOOL_DELIVERY_FEE_CENTS
+    : (selectedQuote ? Math.round(selectedQuote.rate * 100) : 0)
+  const totalPaidCents: number = itemPriceCents + shippingCostCents
 
   // 5. Insert the order
   const { data: order, error: orderError } = await serverClient
     .from('orders')
     .insert({
-      buyer_id:  buyerId,
-      seller_id: listing.seller_id,
+      buyer_id:   buyerId,
+      seller_id:  listing.seller_id,
       listing_id: listingId,
       item_price_cents:    itemPriceCents,
       shipping_cost_cents: shippingCostCents,
       total_paid_cents:    totalPaidCents,
       status:         'PENDING_PAYMENT',
       payment_status: 'PENDING',
-      shipping_method:    selectedQuote?.method          ?? null,
-      service_level_code: selectedQuote?.serviceLevelCode ?? null,
+      shipping_method:    isSchoolDelivery ? null : (selectedQuote?.method ?? null),
+      service_level_code: isSchoolDelivery ? null : (selectedQuote?.serviceLevelCode ?? null),
       quoted_rate_cents:  shippingCostCents,
-      estimated_delivery: selectedQuote?.estimatedDeliveryTo ?? null,
+      estimated_delivery: isSchoolDelivery ? null : (selectedQuote?.estimatedDeliveryTo ?? null),
       delivery_locker_id:   buyerLockerId   ?? null,
       delivery_locker_name: buyerLockerName ?? null,
+      // School delivery fields
+      delivery_type:      deliveryType      ?? null,
+      delivery_school_id: deliverySchoolId  ?? null,
     })
     .select('id')
     .single()
@@ -161,15 +174,34 @@ export async function POST(req: NextRequest) {
   }
 
   // 7. Append the first order event (RULE: never delete or mutate order history)
+  const deliveryNote = isSchoolDelivery
+    ? `school delivery @ R20 (R10 NextKid / R10 to school ${deliverySchoolId})`
+    : 'courier delivery'
   await serverClient.from('order_events').insert({
     order_id:    order.id,
     from_status: null,
     to_status:   'PENDING_PAYMENT',
-    note:        purchasedItemIds.length > 0
-      ? `Order created — ${purchasedItemIds.length} item${purchasedItemIds.length !== 1 ? 's' : ''} selected`
-      : 'Order created by buyer',
+    note: purchasedItemIds.length > 0
+      ? `Order created — ${purchasedItemIds.length} item${purchasedItemIds.length !== 1 ? 's' : ''} selected, ${deliveryNote}`
+      : `Order created by buyer — ${deliveryNote}`,
     created_by: buyerId,
   })
 
-  return NextResponse.json({ orderId: order.id }, { status: 201 })
+  // 8. Credit school ledger R10 for school delivery (on order CREATION — locked in at checkout)
+  // RULE: delivery_school_id is the single source of truth — never changes after this point
+  if (isSchoolDelivery && deliverySchoolId) {
+    await serverClient.from('school_ledger').upsert({
+      school_id:    deliverySchoolId,
+      order_id:     order.id,
+      admin_id:     buyerId,          // attributed to buyer's session for traceability
+      event_type:   'delivery',
+      amount_cents: SCHOOL_KLEREBANK_SPLIT,
+    }, { onConflict: 'order_id,event_type', ignoreDuplicates: true })
+  }
+
+  return NextResponse.json({
+    orderId: order.id,
+    deliveryType: deliveryType ?? 'courier',
+    shippingCostCents,
+  }, { status: 201 })
 }

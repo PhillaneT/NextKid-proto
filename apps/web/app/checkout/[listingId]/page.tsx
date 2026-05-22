@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { ArrowLeft, Lock, Package, Truck, MapPin, Loader2, Home } from 'lucide-react'
+import { ArrowLeft, Package, Truck, MapPin, Loader2, Home, School, CheckCircle2 } from 'lucide-react'
 import type { ShippingQuote } from '@nextkid/shared'
 import LockerMapPicker from '../../components/LockerMapPicker'
 import type { SelectedLocker } from '../../components/LockerMapPicker'
@@ -53,6 +53,16 @@ export default function CheckoutPage() {
   const [buyerLockerAddress, setBuyerLockerAddress] = useState('')
   const [buyerSuburb, setBuyerSuburb] = useState('')
   const [buyerCity, setBuyerCity]     = useState('')
+
+  // School delivery state
+  type SchoolOption = { id: string; name: string; city_name: string }
+  const [schoolMatch,        setSchoolMatch]        = useState(false)
+  const [schoolHubActive,    setSchoolHubActive]    = useState(false)
+  const [matchingSchools,    setMatchingSchools]     = useState<SchoolOption[]>([])
+  const [deliveryType,       setDeliveryType]        = useState<'school' | 'courier'>('courier')
+  const [deliverySchoolId,   setDeliverySchoolId]    = useState<string | null>(null)
+  const [deliverySchoolName, setDeliverySchoolName]  = useState<string | null>(null)
+  const SCHOOL_FEE_CENTS = 2000  // R20 — matches fee_config
 
   useEffect(() => {
     async function load() {
@@ -112,7 +122,24 @@ export default function CheckoutPage() {
         setBuyerLockerAddress(buyerProfile.preferred_locker_address ?? '')
       }
 
-      // 4. Fetch shipping quotes
+      // 4. Check for same-school delivery match
+      const matchRes = await fetch(`/api/checkout/school-match?listingId=${listingId}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      if (matchRes.ok) {
+        const matchData = await matchRes.json()
+        if (matchData.match && matchData.hubActive && matchData.schools?.length > 0) {
+          setSchoolMatch(true)
+          setSchoolHubActive(true)
+          setMatchingSchools(matchData.schools)
+          // Pre-select school delivery with the first matching school
+          setDeliveryType('school')
+          setDeliverySchoolId(matchData.schools[0].id)
+          setDeliverySchoolName(matchData.schools[0].name)
+        }
+      }
+
+      // 5. Fetch shipping quotes (for courier option)
       const res = await fetch('/api/shipping/rates', {
         method: 'POST',
         headers: {
@@ -150,15 +177,16 @@ export default function CheckoutPage() {
     load()
   }, [listingId, router])
 
-  const selectedQuote = quotes.find((q) => q.quoteId === selectedQuoteId) ?? null
-  const shippingCents = selectedQuote ? Math.round(selectedQuote.rate * 100) : 0
-  const totalCents = itemPriceCents + shippingCents
+  const selectedQuote  = quotes.find((q) => q.quoteId === selectedQuoteId) ?? null
+  // School delivery costs R20 flat; courier costs come from TCG quote
+  const shippingCents  = deliveryType === 'school' ? SCHOOL_FEE_CENTS : (selectedQuote ? Math.round(selectedQuote.rate * 100) : 0)
+  const totalCents     = itemPriceCents + shippingCents
 
   // RULE: D2L and L2L quotes require a buyer collection locker to be selected
-  const isPudoDelivery = selectedQuote?.method === 'D2L' || selectedQuote?.method === 'L2L'
+  const isPudoDelivery = deliveryType === 'courier' && (selectedQuote?.method === 'D2L' || selectedQuote?.method === 'L2L')
 
   async function handleConfirmOrder() {
-    if (!selectedQuote) return
+    if (deliveryType === 'courier' && !selectedQuote) return
     setStep('placing')
 
     const { data: sessionData } = await supabase.auth.getSession()
@@ -175,16 +203,17 @@ export default function CheckoutPage() {
       },
       body: JSON.stringify({
         listingId,
-        selectedQuote: {
-          quoteId: selectedQuote.quoteId,
-          method: selectedQuote.method,
-          serviceLevelCode: selectedQuote.serviceLevelCode,
-          serviceLevelName: selectedQuote.serviceLevelName,
-          rate: selectedQuote.rate,
+        deliveryType,
+        deliverySchoolId: deliveryType === 'school' ? deliverySchoolId : null,
+        selectedQuote: deliveryType === 'school' || !selectedQuote ? null : {
+          quoteId:               selectedQuote.quoteId,
+          method:                selectedQuote.method,
+          serviceLevelCode:      selectedQuote.serviceLevelCode,
+          serviceLevelName:      selectedQuote.serviceLevelName,
+          rate:                  selectedQuote.rate,
           estimatedDeliveryFrom: new Date(selectedQuote.estimatedDeliveryFrom).toISOString(),
-          estimatedDeliveryTo: new Date(selectedQuote.estimatedDeliveryTo).toISOString(),
+          estimatedDeliveryTo:   new Date(selectedQuote.estimatedDeliveryTo).toISOString(),
         },
-        // RULE: snapshot buyer's chosen locker at order time — used for D2L and L2L shipment booking
         buyerLockerId:   buyerLockerId   || null,
         buyerLockerName: buyerLockerName || null,
       }),
@@ -341,9 +370,76 @@ export default function CheckoutPage() {
           </div>
         )}
 
-        {/* Shipping options */}
+        {/* ── School delivery option (shown when buyer & seller share a school) ── */}
+        {schoolMatch && schoolHubActive && (
+          <div className="mb-4">
+            <p className="text-xs font-semibold text-[#979797] uppercase tracking-wide mb-2">Delivery method</p>
+
+            {/* School delivery card */}
+            <button
+              onClick={() => setDeliveryType('school')}
+              className={`w-full text-left p-4 rounded-2xl border-2 mb-2 transition ${
+                deliveryType === 'school' ? 'border-[#BE1E2D] bg-red-50' : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${deliveryType === 'school' ? 'bg-[#BE1E2D]' : 'bg-[#f4f4f4]'}`}>
+                    <School size={15} strokeWidth={2} className={deliveryType === 'school' ? 'text-white' : 'text-[#979797]'} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-[#111]">School drop-off — R20</p>
+                    <p className="text-xs text-[#979797] mt-0.5">Collect from {deliverySchoolName ?? matchingSchools[0]?.name}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-base font-bold text-[#BE1E2D]">R 20.00</p>
+                  {deliveryType === 'school' && <CheckCircle2 size={16} className="text-[#BE1E2D] ml-auto mt-1" />}
+                </div>
+              </div>
+              {deliveryType === 'school' && matchingSchools.length > 1 && (
+                <div className="mt-3 pt-3 border-t border-red-100">
+                  <p className="text-xs text-[#979797] mb-2">You have children at multiple matching schools — choose one:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {matchingSchools.map(s => (
+                      <button key={s.id} onClick={e => { e.stopPropagation(); setDeliverySchoolId(s.id); setDeliverySchoolName(s.name); }}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                          deliverySchoolId === s.id ? 'bg-[#BE1E2D] text-white border-[#BE1E2D]' : 'bg-white text-[#111] border-[#dedede] hover:border-[#BE1E2D]'
+                        }`}>
+                        {s.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </button>
+
+            {/* Courier option toggle */}
+            <button
+              onClick={() => setDeliveryType('courier')}
+              className={`w-full text-left p-4 rounded-2xl border-2 transition ${
+                deliveryType === 'courier' ? 'border-[#BE1E2D] bg-red-50' : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${deliveryType === 'courier' ? 'bg-[#BE1E2D]' : 'bg-[#f4f4f4]'}`}>
+                  <Truck size={15} strokeWidth={2} className={deliveryType === 'courier' ? 'text-white' : 'text-[#979797]'} />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[#111]">Courier delivery</p>
+                  <p className="text-xs text-[#979797] mt-0.5">Door-to-door or PUDO locker — see options below</p>
+                </div>
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Shipping options — only shown when courier selected or no school match */}
+        {(deliveryType === 'courier' || !schoolMatch) && (
         <div style={{ marginBottom: '16px' }}>
-          <p style={{ fontSize: '13px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Shipping options</p>
+          <p style={{ fontSize: '13px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
+            {schoolMatch ? 'Courier options' : 'Shipping options'}
+          </p>
           {quotes.length === 0 ? (
             <div style={{ background: '#fff', borderRadius: '16px', padding: '20px', textAlign: 'center', color: '#888' }}>
               No shipping options available.
@@ -399,6 +495,7 @@ export default function CheckoutPage() {
             })
           )}
         </div>
+        )}
 
         {/* PUDO locker picker — appears when buyer selects a D2L or L2L quote */}
         {isPudoDelivery && buyerSuburb && (

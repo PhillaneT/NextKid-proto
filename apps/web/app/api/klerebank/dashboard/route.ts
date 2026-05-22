@@ -38,9 +38,17 @@ export async function GET(req: NextRequest) {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
 
+  // Fetch listing IDs for this school first (subqueries not supported in .in())
+  const { data: schoolListings } = await server
+    .from('listings')
+    .select('id')
+    .eq('seller_school_id', schoolId)
+
+  const listingIds = (schoolListings ?? []).map(l => l.id)
+
   // RULE: join only to get waybill + timing — never select buyer_id, seller_id, listing details
   // Incoming: seller must bring item in (AWAITING_DROPOFF)
-  const { data: incoming } = await server
+  const { data: incoming } = listingIds.length === 0 ? { data: [] } : await server
     .from('orders')
     .select(`
       id,
@@ -50,14 +58,12 @@ export async function GET(req: NextRequest) {
       waybills ( waybill_number )
     `)
     .eq('status', 'AWAITING_DROPOFF')
-    .in('listing_id',
-      server.from('listings').select('id').eq('seller_school_id', schoolId)
-    )
+    .in('listing_id', listingIds)
     .order('auto_dropoff_at', { ascending: true })
     .limit(50)
 
   // At hub: waiting for buyer to collect (ITEM_AT_HUB)
-  const { data: atHub } = await server
+  const { data: atHub } = listingIds.length === 0 ? { data: [] } : await server
     .from('orders')
     .select(`
       id,
@@ -66,21 +72,17 @@ export async function GET(req: NextRequest) {
       waybills ( waybill_number )
     `)
     .eq('status', 'ITEM_AT_HUB')
-    .in('listing_id',
-      server.from('listings').select('id').eq('seller_school_id', schoolId)
-    )
+    .in('listing_id', listingIds)
     .order('dropped_off_at', { ascending: false })
     .limit(50)
 
   // Completed today
-  const { count: completedToday } = await server
+  const { count: completedToday } = listingIds.length === 0 ? { count: 0 } : await server
     .from('orders')
     .select('id', { count: 'exact', head: true })
     .eq('status', 'COMPLETED')
     .gte('collected_at', todayStart.toISOString())
-    .in('listing_id',
-      server.from('listings').select('id').eq('seller_school_id', schoolId)
-    )
+    .in('listing_id', listingIds)
 
   // Admin's earnings this month from school_ledger
   const monthStart = new Date()

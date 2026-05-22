@@ -31,7 +31,6 @@ export type { UserLocation } from '../types/location';
 // Pricing calculator — buyer price from seller net amount
 export {
   calculateBuyerPrice,
-  calculateFromListingPrice,
   fmtRands,
   DEFAULT_PRICING,
 } from './pricing';

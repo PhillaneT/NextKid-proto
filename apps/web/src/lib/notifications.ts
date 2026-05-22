@@ -1,288 +1,88 @@
 /**
- * NextKid — Order Notification Helper
+ * NextKid — Full Order Lifecycle Notification System
  *
- * Sends push notifications (real, via Expo) and emails (demo — logs to console).
- * To enable real emails: sign up at resend.com, add RESEND_API_KEY to .env.local,
- * and uncomment the Resend block in sendEmail() below.
+ * Covers every status change in the order lifecycle with:
+ * - Real push notifications (Expo Push API)
+ * - Email (Resend when API key present, console log otherwise)
+ * - In-app notifications (saved to notifications table)
+ *
+ * Messages use dynamic context: waybill number, school name, deadline date.
  */
 
 import { createServerSupabaseClient } from './supabase-server'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface NotificationPayload {
-  orderId: string
-  newStatus: string
+export interface NotificationPayload {
+  orderId:     string
+  newStatus:   string
   triggeredBy: 'buyer' | 'seller' | 'system' | 'admin'
 }
 
-interface OrderData {
-  id: string
-  status: string
-  item_price_cents: number
-  total_paid_cents: number
-  buyer_id: string
-  seller_id: string
-  listing_id: string
+interface OrderContext {
+  id:           string
+  buyerId:      string
+  sellerId:     string
+  listingId:    string
+  waybill:      string       // e.g. NK-260521-AB3X7Q
+  schoolName:   string       // e.g. Noordwyk High School
+  itemTitle:    string       // e.g. Grey school trousers
+  deadline:     string       // formatted date for drop-off
+  deliverySchoolId: string | null
 }
 
 interface Profile {
-  id: string
-  full_name: string | null
-  email: string | null
+  id:              string
+  full_name:       string | null
+  email:           string | null
   expo_push_token: string | null
 }
 
-// ── Status message config ─────────────────────────────────────────────────────
-
-const STATUS_MESSAGES: Record<string, {
-  buyer?: { push: string; email: { subject: string; body: string } }
-  seller?: { push: string; email: { subject: string; body: string } }
-  hubAdmin?: { push: string }
-}> = {
-  // ── Klerebank Hub Admin alerts ─────────────────────────────────────────────
-  AWAITING_DROPOFF: {
-    hubAdmin: {
-      push: '📦 Heads up — expecting {{waybill}}. Drop-off due by {{date}}.',
-    },
-    buyer: {
-      push: '💳 Payment secured! Waiting for the seller to bring your item to a Klerebank hub.',
-      email: {
-        subject: 'Payment confirmed — seller is bringing your item to Klerebank',
-        body: 'Your payment has been secured in escrow. The seller has 3 business days to drop your item off at a Klerebank hub. You\'ll receive your collection QR once the item is confirmed at the hub.',
-      },
-    },
-    seller: {
-      push: '📦 New order! Drop your item off at a Klerebank hub within 3 business days.',
-      email: {
-        subject: 'New order — drop off your item at Klerebank within 3 days',
-        body: 'A buyer has paid for your item and the funds are held in escrow. Please bring the item to your nearest Klerebank hub within 3 business days. Use the Drop-Off QR in your order details — the admin will scan it to confirm receipt.',
-      },
-    },
-  },
-  ITEM_AT_HUB: {
-    buyer: {
-      push: '🎉 Your item is at the Klerebank hub and ready to collect! Open the app for your QR.',
-      email: {
-        subject: 'Your item is ready to collect at Klerebank',
-        body: 'Great news — the seller has dropped off your item and it\'s been confirmed at the Klerebank hub. Open the app to get your Collection QR, then visit any Klerebank location to collect your item. Your QR is valid for 14 days.',
-      },
-    },
-    seller: {
-      push: '✅ Item received at Klerebank hub. Payment will be released once the buyer collects.',
-      email: {
-        subject: 'Item confirmed at Klerebank — waiting for buyer to collect',
-        body: 'Your item has been received and confirmed at the Klerebank hub. The buyer has been notified and sent their collection QR. Once they collect, your payment (minus platform commission) will be released automatically.',
-      },
-    },
-    hubAdmin: {
-      push: '✅ {{waybill}} collected and closed. Your R10 has been added to this month.',
-    },
-  },
-  // ── Multi-item partial sale ────────────────────────────────────────────────
-  PARTIAL_SALE: {
-    seller: {
-      push: '🛒 Some items from your listing just sold!',
-      email: {
-        subject: 'Items sold — remaining items still listed',
-        body: 'A buyer has purchased some items from your multi-item listing. The unsold items are still active and available for other buyers to purchase.',
-      },
-    },
-    buyer: {
-      push: '🎉 Your selected items are reserved! Complete checkout to confirm.',
-      email: {
-        subject: 'Your selected items — complete your order',
-        body: 'You have selected items from a listing. Your items are reserved for 15 minutes. Please complete checkout before your reservation expires.',
-      },
-    },
-  },
-
-  // ── Hub fulfilment flow ────────────────────────────────────────────────────
-  AWAITING_DROPOFF: {
-    buyer: {
-      push: '💳 Payment secured! Waiting for the seller to bring your item to a Klerebank hub.',
-      email: {
-        subject: 'Payment confirmed — seller is bringing your item to Klerebank',
-        body: 'Your payment has been secured in escrow. The seller has 3 business days to drop your item off at a Klerebank hub. You\'ll receive your collection QR once the item is confirmed at the hub.',
-      },
-    },
-    seller: {
-      push: '📦 New order! Drop your item off at a Klerebank hub within 3 business days.',
-      email: {
-        subject: 'New order — drop off your item at Klerebank within 3 days',
-        body: 'A buyer has paid for your item and the funds are held in escrow. Please bring the item to your nearest Klerebank hub within 3 business days. Use the Drop-Off QR in your order details — the admin will scan it to confirm receipt.',
-      },
-    },
-  },
-  ITEM_AT_HUB: {
-    buyer: {
-      push: '🎉 Your item is at the Klerebank hub and ready to collect! Open the app for your QR.',
-      email: {
-        subject: 'Your item is ready to collect at Klerebank',
-        body: 'Great news — the seller has dropped off your item and it\'s been confirmed at the Klerebank hub. Open the app to get your Collection QR, then visit any Klerebank location to collect your item. Your QR is valid for 14 days.',
-      },
-    },
-    seller: {
-      push: '✅ Item received at Klerebank hub. Payment will be released once the buyer collects.',
-      email: {
-        subject: 'Item confirmed at Klerebank — waiting for buyer to collect',
-        body: 'Your item has been received and confirmed at the Klerebank hub. The buyer has been notified and sent their collection QR. Once they collect, your payment (minus platform commission) will be released automatically.',
-      },
-    },
-  },
-  // ── Legacy courier flow ────────────────────────────────────────────────────
-  AWAITING_SHIPMENT_BOOKING: {
-    buyer: {
-      push: '💳 Payment secured! Waiting for seller to ship your order.',
-      email: {
-        subject: 'Payment confirmed — your order is being prepared',
-        body: 'Your payment has been secured in escrow. The seller has 3 business days to ship your item. We\'ll notify you the moment it\'s on its way.',
-      },
-    },
-    seller: {
-      push: '🎉 New order! Payment received. Ship within 3 business days.',
-      email: {
-        subject: 'You have a new order — ship within 3 business days',
-        body: 'A buyer has paid for your item. Please package and ship it within 3 business days. Failure to ship will result in automatic cancellation and a full refund to the buyer.',
-      },
-    },
-  },
-  SHIPMENT_BOOKED: {
-    buyer: {
-      push: '📦 Your order has been booked for shipping!',
-      email: {
-        subject: 'Your order has been booked for shipping',
-        body: 'The seller has booked your shipment. You\'ll receive another notification with your tracking details once it\'s collected.',
-      },
-    },
-  },
-  SHIPPED: {
-    buyer: {
-      push: '🚚 Your order is on its way!',
-      email: {
-        subject: 'Your order has been shipped',
-        body: 'Your order has been collected and is on its way to you. Check your order details for tracking information.',
-      },
-    },
-  },
-  IN_TRANSIT: {
-    buyer: {
-      push: '📍 Your order is in transit.',
-      email: {
-        subject: 'Your order is in transit',
-        body: 'Your order is on its way and currently in transit. Expected delivery is on track.',
-      },
-    },
-  },
-  OUT_FOR_DELIVERY: {
-    buyer: {
-      push: '🏠 Your order is out for delivery today!',
-      email: {
-        subject: 'Your order is out for delivery today!',
-        body: 'Great news — your order is with the courier and will be delivered today. Make sure someone is available to receive it.',
-      },
-    },
-  },
-  DELIVERED: {
-    buyer: {
-      push: '✅ Your order has arrived! Please confirm receipt to release payment.',
-      email: {
-        subject: 'Your order has been delivered — please confirm receipt',
-        body: 'Your order has been marked as delivered. Please open the app and confirm that you received your item in good condition. If you don\'t confirm within 14 days, payment will be automatically released to the seller.',
-      },
-    },
-  },
-  COMPLETED: {
-    buyer: {
-      push: '🎉 Order complete! Thanks for shopping on NextKid.',
-      email: {
-        subject: 'Order complete — thank you!',
-        body: 'Your order is complete. We hope you\'re happy with your purchase! Feel free to browse more listings on NextKid.',
-      },
-    },
-    seller: {
-      push: '💰 Payment released! Your funds are on their way.',
-      email: {
-        subject: 'Payment released — your payout is on its way',
-        body: 'The buyer has confirmed receipt of their order. Your payment (minus the platform commission) has been released. Thank you for selling on NextKid!',
-      },
-    },
-  },
-  AUTO_CANCELLED: {
-    buyer: {
-      push: '❌ Your order was auto-cancelled. Full refund issued.',
-      email: {
-        subject: 'Order auto-cancelled — full refund issued',
-        body: 'Unfortunately the seller did not ship your order within 3 business days, so it has been automatically cancelled. A full refund has been issued.',
-      },
-    },
-    seller: {
-      push: '⚠️ Order cancelled — you did not ship in time.',
-      email: {
-        subject: 'Order cancelled — shipping deadline missed',
-        body: 'Your order was automatically cancelled because you did not ship within 3 business days. The buyer has received a full refund. Please ensure future orders are shipped on time.',
-      },
-    },
-  },
-  CANCELLED: {
-    buyer: {
-      push: '❌ Your order has been cancelled. Refund issued.',
-      email: {
-        subject: 'Order cancelled — refund issued',
-        body: 'Your order has been cancelled and any payment has been fully refunded.',
-      },
-    },
-  },
-}
-
-// ── Push notification (real — Expo Push API, free) ────────────────────────────
+// ── Push notification ─────────────────────────────────────────────────────────
 
 async function sendPush(token: string, title: string, body: string) {
-  if (!token || !token.startsWith('ExponentPushToken')) return
-
+  if (!token?.startsWith('ExponentPushToken')) return
   try {
     await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ to: token, title, body, sound: 'default', priority: 'high' }),
+      body:    JSON.stringify({ to: token, title, body, sound: 'default', priority: 'high' }),
     })
   } catch (err) {
     console.error('[Push] Failed to send:', err)
   }
 }
 
-// ── Email (demo mode — logs to console) ──────────────────────────────────────
-// To send real emails: add RESEND_API_KEY to .env.local and uncomment below.
+// ── Email ─────────────────────────────────────────────────────────────────────
 
 async function sendEmail(to: string, subject: string, body: string, name: string) {
   const RESEND_API_KEY = process.env.RESEND_API_KEY
+  const baseUrl        = process.env.NEXTAUTH_URL ?? 'http://localhost:5000'
 
   if (RESEND_API_KEY) {
-    // ── Real email via Resend (uncomment when you have an API key) ──
     await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RESEND_API_KEY}` },
       body: JSON.stringify({
-        from: 'NextKid <orders@nextkid.co.za>',
-        to: [to],
+        from: 'NextKid <support@nextkid.co.za>',
+        to:   [to],
         subject,
         html: `
           <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px">
             <div style="background:#3A3A3A;padding:16px 24px;border-radius:12px 12px 0 0">
-              <img src="${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/logo.png" alt="NextKid" style="height:80px;width:auto" />
+              <img src="${baseUrl}/logo.png" alt="NextKid" style="height:80px;width:auto" />
             </div>
             <div style="background:#fff;border:1px solid #dedede;border-top:none;padding:28px;border-radius:0 0 12px 12px">
               <p style="color:#979797;font-size:13px;margin:0 0 4px">Hi ${name},</p>
               <h2 style="color:#111;font-size:20px;margin:0 0 16px">${subject}</h2>
               <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 24px">${body}</p>
-              <a href="${process.env.NEXTAUTH_URL ?? 'http://localhost:5000'}/orders"
+              <a href="${baseUrl}/orders"
                 style="background:#BE1E2D;color:#fff;text-decoration:none;padding:12px 24px;border-radius:30px;font-weight:700;font-size:14px">
                 View my orders
               </a>
-              <p style="color:#979797;font-size:11px;margin:24px 0 0">NextKid · South Africa's school marketplace · Wear. Grow. Repeat.</p>
+              <p style="color:#979797;font-size:11px;margin:24px 0 0">
+                NextKid · South Africa's school marketplace · Wear. Grow. Repeat.
+              </p>
             </div>
           </div>
         `,
@@ -290,67 +90,101 @@ async function sendEmail(to: string, subject: string, body: string, name: string
     })
     console.log(`[Email] ✅ Sent to ${to}: "${subject}"`)
   } else {
-    // ── DEMO MODE — log what would be sent ──
-    console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║  DEMO EMAIL (add RESEND_API_KEY to send real emails)         ║
-╠══════════════════════════════════════════════════════════════╣
-║  To:      ${to.padEnd(52)}║
-║  Name:    ${name.padEnd(52)}║
-║  Subject: ${subject.padEnd(52)}║
-╠══════════════════════════════════════════════════════════════╣
-║  ${body.slice(0, 60).padEnd(60)}║
-╚══════════════════════════════════════════════════════════════╝
-    `)
+    console.log(`[Email DEMO] To: ${to} | Subject: ${subject}`)
   }
 }
 
-// ── Save notification to DB ───────────────────────────────────────────────────
+// ── Save to DB ────────────────────────────────────────────────────────────────
 
-async function saveNotification(
-  server: ReturnType<typeof createServerSupabaseClient>,
-  userId: string,
-  type: string,
+async function save(
+  server:  ReturnType<typeof createServerSupabaseClient>,
+  userId:  string,
+  orderId: string | null,
+  type:    string,
   message: string,
-  itemId: string | null
+  listingId: string | null,
 ) {
   await server.from('notifications').insert({
-    user_id: userId,
+    user_id:  userId,
+    order_id: orderId,
     type,
     message,
-    item_id: itemId,
-    read: false,
-  }).select()
+    item_id:  listingId,
+    read:     false,
+    sent_at:  new Date().toISOString(),
+  })
+}
+
+// ── Notify one person (push + email + DB) ─────────────────────────────────────
+
+async function notify(
+  server:   ReturnType<typeof createServerSupabaseClient>,
+  profile:  Profile,
+  orderId:  string,
+  listingId: string,
+  type:     string,
+  pushMsg:  string,
+  emailSubject: string,
+  emailBody:    string,
+) {
+  if (profile.expo_push_token) {
+    await sendPush(profile.expo_push_token, 'NextKid', pushMsg)
+  }
+  if (profile.email) {
+    await sendEmail(profile.email, emailSubject, emailBody, profile.full_name ?? 'there')
+  }
+  await save(server, profile.id, orderId, type, pushMsg, listingId)
+}
+
+// ── Notify all active school admins for a given school ────────────────────────
+
+async function notifySchoolAdmins(
+  server:    ReturnType<typeof createServerSupabaseClient>,
+  schoolId:  string,
+  orderId:   string,
+  type:      string,
+  pushMsg:   string,
+) {
+  if (!schoolId) return
+  const { data: admins } = await server
+    .from('school_admins')
+    .select('user_id, profiles(id, expo_push_token, full_name, email)')
+    .eq('school_id', schoolId)
+    .eq('active', true)
+
+  for (const row of admins ?? []) {
+    const prof = (row.profiles as unknown as Profile)
+    if (!prof) continue
+    if (prof.expo_push_token) await sendPush(prof.expo_push_token, 'NextKid Hub', pushMsg)
+    await save(server, prof.id, orderId, type, pushMsg, null)
+  }
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function sendOrderNotification({ orderId, newStatus }: NotificationPayload) {
-  const config = STATUS_MESSAGES[newStatus]
-  if (!config) return // No notification configured for this status
-
   const server = createServerSupabaseClient()
 
-  // Fetch order
+  // Fetch everything needed for dynamic messages
   const { data: order } = await server
     .from('orders')
-    .select('id, status, item_price_cents, total_paid_cents, buyer_id, seller_id, listing_id')
+    .select(`
+      id, buyer_id, seller_id, listing_id,
+      auto_dropoff_at, delivery_school_id,
+      waybills ( waybill_number )
+    `)
     .eq('id', orderId)
-    .single() as { data: OrderData | null }
+    .single()
 
   if (!order) return
 
-  // Fetch listing title for notifications
   const { data: listing } = await server
-    .from('listings')
-    .select('title')
-    .eq('id', order.listing_id)
-    .single()
+    .from('listings').select('title').eq('id', order.listing_id).single()
 
-  const itemTitle = listing?.title ?? 'your item'
-  const shortTitle = itemTitle.length > 30 ? itemTitle.slice(0, 30) + '…' : itemTitle
+  const { data: school } = order.delivery_school_id
+    ? await server.from('schools').select('name').eq('id', order.delivery_school_id).single()
+    : { data: null }
 
-  // Fetch buyer + seller profiles
   const { data: profiles } = await server
     .from('profiles')
     .select('id, full_name, email, expo_push_token')
@@ -359,38 +193,188 @@ export async function sendOrderNotification({ orderId, newStatus }: Notification
   const buyer  = profiles?.find(p => p.id === order.buyer_id)
   const seller = profiles?.find(p => p.id === order.seller_id)
 
-  // ── Buyer notifications ──────────────────────────────────────────────────
-  if (config.buyer && buyer) {
-    const pushMsg = `${config.buyer.push}\n${shortTitle}`
-
-    // Push
-    if (buyer.expo_push_token) {
-      await sendPush(buyer.expo_push_token, 'NextKid — Order Update', pushMsg)
-    }
-
-    // Email
-    if (buyer.email) {
-      await sendEmail(buyer.email, config.buyer.email.subject, config.buyer.email.body, buyer.full_name ?? 'there')
-    }
-
-    // Save to notifications table
-    await saveNotification(server, buyer.id, newStatus.toLowerCase(), pushMsg, order.listing_id)
+  // Build context for dynamic messages
+  const ctx: OrderContext = {
+    id:           order.id,
+    buyerId:      order.buyer_id,
+    sellerId:     order.seller_id,
+    listingId:    order.listing_id,
+    waybill:      (order.waybills as any)?.waybill_number ?? 'NK-XXXXXX',
+    schoolName:   school?.name ?? 'the Klerebank hub',
+    itemTitle:    listing?.title ?? 'your item',
+    deadline:     order.auto_dropoff_at
+      ? new Date(order.auto_dropoff_at).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })
+      : 'within 3 days',
+    deliverySchoolId: order.delivery_school_id ?? null,
   }
 
-  // ── Seller notifications ─────────────────────────────────────────────────
-  if (config.seller && seller) {
-    const pushMsg = `${config.seller.push}\n${shortTitle}`
+  // ── Per-status notification logic ──────────────────────────────────────────
 
-    if (seller.expo_push_token) {
-      await sendPush(seller.expo_push_token, 'NextKid — Order Update', pushMsg)
+  switch (newStatus) {
+
+    case 'AWAITING_DROPOFF': {
+      // SELLER: Ka-ching!
+      if (seller) {
+        await notify(server, seller, ctx.id, ctx.listingId,
+          'awaiting_dropoff',
+          `Ka-ching! 🎉 Pack those items and drop them at the Klerebank by ${ctx.deadline}.\n${ctx.waybill}`,
+          'New order — drop-off required',
+          `Great news — someone bought your item "${ctx.itemTitle}"! Your funds are held safely. Please pack the item and drop it off at ${ctx.schoolName} by ${ctx.deadline}. Use your Drop-Off QR code in the order details.`,
+        )
+      }
+      // BUYER: payment confirmed
+      if (buyer) {
+        await notify(server, buyer, ctx.id, ctx.listingId,
+          'awaiting_dropoff',
+          `Payment confirmed! 💳 The seller is bringing your item to ${ctx.schoolName}.`,
+          'Payment confirmed — item on its way to hub',
+          `Your payment for "${ctx.itemTitle}" has been secured. The seller has been notified and must drop the item at ${ctx.schoolName} by ${ctx.deadline}. You'll get a collection QR once it arrives.`,
+        )
+      }
+      // ADMIN: heads up
+      if (ctx.deliverySchoolId) {
+        await notifySchoolAdmins(server, ctx.deliverySchoolId, ctx.id,
+          'dropoff_expected',
+          `📦 Expecting ${ctx.waybill}. Drop-off due ${ctx.deadline}.`,
+        )
+      }
+      break
     }
 
-    if (seller.email) {
-      await sendEmail(seller.email, config.seller.email.subject, config.seller.email.body, seller.full_name ?? 'there')
+    case 'ITEM_AT_HUB': {
+      // SELLER: parcel received
+      if (seller) {
+        await notify(server, seller, ctx.id, ctx.listingId,
+          'item_at_hub',
+          `Your parcel has been received at ${ctx.schoolName}. Sit tight. 🏫`,
+          'Item received at Klerebank hub',
+          `Good news — your item "${ctx.itemTitle}" (${ctx.waybill}) has been received at ${ctx.schoolName}. The buyer has been notified and sent their collection QR. Payment will be released automatically once they collect.`,
+        )
+      }
+      // BUYER: go collect!
+      if (buyer) {
+        await notify(server, buyer, ctx.id, ctx.listingId,
+          'item_at_hub',
+          `Your order is at ${ctx.schoolName}! 🎁 Go collect with your QR.`,
+          'Your order is ready to collect!',
+          `"${ctx.itemTitle}" is waiting for you at ${ctx.schoolName}. Open the app to get your Collection QR, show it to the Klerebank admin, and you're done! Your QR is valid for 14 days.`,
+        )
+      }
+      break
     }
 
-    await saveNotification(server, seller.id, newStatus.toLowerCase(), pushMsg, order.listing_id)
+    case 'COMPLETED': {
+      // BUYER: enjoy!
+      if (buyer) {
+        await notify(server, buyer, ctx.id, ctx.listingId,
+          'completed',
+          `Enjoy your new goodies! 🎉 Don't forget to leave the seller a review.`,
+          'Order complete — enjoy your item!',
+          `You've collected "${ctx.itemTitle}" — we hope you love it! Consider leaving the seller a review to help the NextKid community grow. Wear it well. Grow. Repeat.`,
+        )
+      }
+      // SELLER: payment coming
+      if (seller) {
+        await notify(server, seller, ctx.id, ctx.listingId,
+          'completed',
+          `Your buyer collected their order. 💰 Payment is on its way — reflects within 24 hours.`,
+          'Payment released — funds on their way',
+          `Your buyer has collected "${ctx.itemTitle}" (${ctx.waybill}). Your payout (minus platform commission) has been released and will reflect in your account within 24 hours. Thank you for selling on NextKid!`,
+        )
+      }
+      // ADMIN: WB closed
+      if (ctx.deliverySchoolId) {
+        await notifySchoolAdmins(server, ctx.deliverySchoolId, ctx.id,
+          'collection_complete',
+          `${ctx.waybill} closed. ✅ Your R10 is included in this month's payout.`,
+        )
+      }
+      break
+    }
+
+    case 'AUTO_CANCELLED': {
+      if (buyer) {
+        await notify(server, buyer, ctx.id, ctx.listingId,
+          'auto_cancelled',
+          `❌ Your order was auto-cancelled — the seller didn't drop off in time. Full refund issued.`,
+          'Order auto-cancelled — full refund issued',
+          `Unfortunately the seller did not drop off "${ctx.itemTitle}" at the Klerebank by ${ctx.deadline}, so your order has been automatically cancelled. A full refund has been issued.`,
+        )
+      }
+      if (seller) {
+        await notify(server, seller, ctx.id, ctx.listingId,
+          'auto_cancelled',
+          `⚠️ Your order was cancelled — you missed the drop-off deadline.`,
+          'Order cancelled — drop-off deadline missed',
+          `Your order for "${ctx.itemTitle}" was automatically cancelled because you didn't drop it off by ${ctx.deadline}. The buyer received a full refund. Please ensure future orders are dropped off on time.`,
+        )
+      }
+      break
+    }
+
+    case 'CANCELLED': {
+      if (buyer) {
+        await notify(server, buyer, ctx.id, ctx.listingId,
+          'cancelled',
+          `❌ Your order has been cancelled. Any payment has been refunded.`,
+          'Order cancelled — refund issued',
+          `Your order for "${ctx.itemTitle}" has been cancelled. Any payment has been fully refunded.`,
+        )
+      }
+      break
+    }
+
+    default:
+      console.log(`[Notifications] No handler for status: ${newStatus}`)
   }
 
   console.log(`[Notifications] ✅ Sent for order ${orderId.slice(0, 8)} → ${newStatus}`)
+}
+
+// ── Nudge uncollected buyers (called by cron / scheduled job) ─────────────────
+
+export async function nudgeUncollectedBuyers() {
+  const server    = createServerSupabaseClient()
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+
+  // Find orders that have been at the hub for > 2 days with no collection
+  const { data: orders } = await server
+    .from('orders')
+    .select(`
+      id, buyer_id, listing_id, delivery_school_id,
+      waybills ( waybill_number ),
+      listings ( title )
+    `)
+    .eq('status', 'ITEM_AT_HUB')
+    .lt('dropped_off_at', twoDaysAgo)
+
+  if (!orders?.length) return 0
+
+  for (const order of orders) {
+    const { data: buyer } = await server
+      .from('profiles')
+      .select('id, full_name, email, expo_push_token')
+      .eq('id', order.buyer_id)
+      .single() as { data: Profile | null }
+
+    if (!buyer) continue
+
+    const schoolName = order.delivery_school_id
+      ? (await server.from('schools').select('name').eq('id', order.delivery_school_id).single()).data?.name ?? 'the hub'
+      : 'the hub'
+
+    const waybill   = (order.waybills as any)?.waybill_number ?? 'NK-XXXXXX'
+    const itemTitle = (order.listings as any)?.title ?? 'your item'
+
+    await notify(
+      server, buyer, order.id, order.listing_id,
+      'nudge_uncollected',
+      `⏰ Your order is still waiting at ${schoolName}. It's not going anywhere — but the admin would love the shelf space back!`,
+      'Friendly reminder — your order is waiting',
+      `Just a nudge: "${itemTitle}" (${waybill}) is still waiting for you at ${schoolName}. Pop in whenever you're ready — the Klerebank admin will scan your QR to complete the handover. Your collection QR is in the order details.`,
+    )
+  }
+
+  console.log(`[Nudge] Sent to ${orders.length} uncollected buyer${orders.length !== 1 ? 's' : ''}`)
+  return orders.length
 }

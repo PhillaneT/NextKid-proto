@@ -6,9 +6,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
+import { WEB_API_BASE } from '@/src/lib/api';
 import {
   Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
   Lock, BadgeCheck, MapPin, Search, ShoppingCart, Check, School,
+  Sparkles, Baby,
 } from 'lucide-react-native';
 import { useCart } from '@/src/lib/cart';
 import { ALL_CATEGORIES } from '@nextkid/shared';
@@ -32,6 +34,14 @@ function CategoryIcon({ name, color, size = 22 }: { name: string; color: string;
 }
 
 type BrowseTab = 'my_school' | 'all';
+
+type FeedItem = {
+  id: string; title: string; category: string; price_cents: number
+  images: string[]; size: string | null; seller_id: string; seller_school_id: string | null
+};
+type FeedSection  = { type: string; title: string; items: FeedItem[] };
+type ChildFeed    = { childId: string; nickname: string; gender: string; sections: FeedSection[] };
+type PersonalFeed = { children: ChildFeed[]; fromCache: boolean } | null;
 
 type Listing = {
   id: string;
@@ -65,15 +75,27 @@ export default function HomeScreen() {
   const [filtered, setFiltered]           = useState<Listing[]>([]);
   const [loading, setLoading]             = useState(true);
   const [selectedCat, setSelectedCat]     = useState<ListingCategory | ''>('');
+  const [personalFeed, setPersonalFeed]   = useState<PersonalFeed>(null);
+  const [activeChild, setActiveChild]     = useState(0);
+  const [feedLoading, setFeedLoading]     = useState(false);
 
-  // Load user profile + school IDs on every focus
+  // Load user profile + school IDs on every focus; also refresh feed
   useFocusEffect(useCallback(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) { router.replace('/' as never); return; }
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { router.replace('/' as never); return; }
       const { data: prof } = await supabase
-        .from('profiles').select('full_name, school_ids').eq('id', user.id).single();
+        .from('profiles').select('full_name, school_ids').eq('id', session.user.id).single();
       setFirstName(prof?.full_name?.split(' ')[0] ?? '');
       setUserSchoolIds(prof?.school_ids ?? []);
+
+      // Load personalised feed
+      setFeedLoading(true);
+      fetch(`${WEB_API_BASE}/api/feed`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { setPersonalFeed(data); setFeedLoading(false); })
+        .catch(() => setFeedLoading(false));
     });
   }, []));
 
@@ -157,6 +179,86 @@ export default function HomeScreen() {
                 </View>
               ))}
             </View>
+
+            {/* ── Personalised feed ── */}
+            {feedLoading ? (
+              <View style={styles.feedLoadingRow}>
+                <Sparkles size={14} strokeWidth={2} color={CRIMSON} />
+                <Text style={styles.feedLoadingText}>Building your personalised feed...</Text>
+              </View>
+            ) : personalFeed && personalFeed.children.length > 0 ? (
+              <View style={styles.feedSection}>
+                <View style={styles.feedHeader}>
+                  <Sparkles size={15} strokeWidth={2} color={CRIMSON} />
+                  <Text style={styles.feedTitle}>Your Personalised Feed</Text>
+                  <TouchableOpacity onPress={() => router.push('/children' as never)} style={styles.feedManageBtn}>
+                    <Baby size={12} strokeWidth={2} color={CRIMSON} />
+                    <Text style={styles.feedManageText}>Manage</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Child tabs (multi-child) */}
+                {personalFeed.children.length > 1 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.childTabScroll} contentContainerStyle={styles.childTabContent}>
+                    {personalFeed.children.map((child, i) => (
+                      <TouchableOpacity
+                        key={child.childId}
+                        style={[styles.childTab, activeChild === i && styles.childTabActive]}
+                        onPress={() => setActiveChild(i)}
+                      >
+                        <Text style={[styles.childTabText, activeChild === i && styles.childTabTextActive]}>
+                          {child.gender === 'boy' ? '👦' : child.gender === 'girl' ? '👧' : '🧒'} {child.nickname}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+
+                {/* Sections for active child */}
+                {(personalFeed.children[activeChild]?.sections ?? []).map(section => (
+                  <View key={section.type} style={styles.sectionBlock}>
+                    <Text style={styles.sectionBlockTitle}>{section.title}</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingRight: 14 }}>
+                      {section.items.map(item => (
+                        <TouchableOpacity
+                          key={item.id}
+                          style={styles.feedCard}
+                          onPress={() => router.push(`/item/${item.id}` as never)}
+                          activeOpacity={0.85}
+                        >
+                          <View style={styles.feedCardImage}>
+                            {item.images?.[0] ? (
+                              <Image source={{ uri: item.images[0] }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                            ) : (
+                              <CategoryIcon name={item.category} color="#dedede" size={28} />
+                            )}
+                            {item.size && (
+                              <View style={styles.feedSizeChip}>
+                                <Text style={styles.feedSizeText}>Size {item.size}</Text>
+                              </View>
+                            )}
+                          </View>
+                          <View style={styles.feedCardBody}>
+                            <Text style={styles.feedCardCat} numberOfLines={1}>{item.category}</Text>
+                            <Text style={styles.feedCardTitle} numberOfLines={2}>{item.title}</Text>
+                            <Text style={styles.feedCardPrice}>R {(item.price_cents / 100).toFixed(2)}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ))}
+              </View>
+            ) : !feedLoading && personalFeed && personalFeed.children.length === 0 ? (
+              <TouchableOpacity style={styles.addChildBanner} onPress={() => router.push('/children' as never)}>
+                <Baby size={18} strokeWidth={1.5} color={CRIMSON} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.addChildTitle}>Get a personalised feed</Text>
+                  <Text style={styles.addChildSub}>Add your child's sizes to see what fits right now.</Text>
+                </View>
+                <Text style={styles.addChildArrow}>→</Text>
+              </TouchableOpacity>
+            ) : null}
 
             {/* My School / All Items tab switcher */}
             <View style={styles.tabBar}>
@@ -349,4 +451,33 @@ const styles = StyleSheet.create({
   emptyText:    { color: '#979797', fontSize: 13 },
   emptyBtn:     { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: CRIMSON, borderRadius: 30 },
   emptyBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+
+  // Personalised feed
+  feedLoadingRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginVertical: 12, padding: 12, backgroundColor: '#fff5f5', borderRadius: 12 },
+  feedLoadingText: { color: CRIMSON, fontSize: 13, fontWeight: '500' },
+  feedSection:     { marginTop: 4 },
+  feedHeader:      { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 14, marginBottom: 10 },
+  feedTitle:       { flex: 1, color: '#111', fontSize: 15, fontWeight: '700' },
+  feedManageBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  feedManageText:  { color: CRIMSON, fontSize: 12, fontWeight: '600' },
+  childTabScroll:  { flexGrow: 0 },
+  childTabContent: { paddingHorizontal: 14, gap: 8, flexDirection: 'row', marginBottom: 10 },
+  childTab:        { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: '#fff' },
+  childTabActive:  { backgroundColor: CRIMSON, borderColor: CRIMSON },
+  childTabText:    { color: '#555', fontSize: 13, fontWeight: '600' },
+  childTabTextActive: { color: '#fff' },
+  sectionBlock:    { marginBottom: 16 },
+  sectionBlockTitle: { color: '#111', fontSize: 13, fontWeight: '700', marginHorizontal: 14, marginBottom: 8 },
+  feedCard:        { width: 140, backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: BORDER },
+  feedCardImage:   { width: 140, height: 140, backgroundColor: SURFACE, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  feedSizeChip:    { position: 'absolute', top: 6, left: 6, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
+  feedSizeText:    { fontSize: 9, fontWeight: '700', color: '#111' },
+  feedCardBody:    { padding: 8 },
+  feedCardCat:     { color: '#979797', fontSize: 10, marginBottom: 2 },
+  feedCardTitle:   { color: '#111', fontSize: 11, fontWeight: '600', lineHeight: 15, marginBottom: 4 },
+  feedCardPrice:   { color: CRIMSON, fontSize: 13, fontWeight: '800' },
+  addChildBanner:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 14, marginVertical: 10, padding: 14, backgroundColor: '#fff5f5', borderRadius: 14, borderWidth: 1, borderColor: '#fecaca' },
+  addChildTitle:   { color: '#111', fontSize: 13, fontWeight: '700' },
+  addChildSub:     { color: '#979797', fontSize: 11, marginTop: 2 },
+  addChildArrow:   { color: CRIMSON, fontSize: 18, fontWeight: '700' },
 });

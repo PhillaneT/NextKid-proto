@@ -410,3 +410,21 @@ export async function nudgeUncollectedBuyers() {
   console.log(`[Nudge] Sent to ${orders.length} uncollected buyer${orders.length !== 1 ? 's' : ''}`)
   return orders.length
 }
+
+// ── Lifecycle reminder notification — fired by /api/cron/reminders ────────────
+
+export async function sendReminderNotification(userId: string, message: string) {
+  const server = createServerSupabaseClient()
+
+  const { data: profile } = await server
+    .from('profiles')
+    .select('id, expo_push_token')
+    .eq('id', userId)
+    .maybeSingle() as { data: { id: string; expo_push_token: string | null } | null }
+
+  if (profile?.expo_push_token) {
+    await sendPush(profile.expo_push_token, 'NextKid', message)
+  }
+
+  await save(server, userId, null, 'reminder', message, null)
+}

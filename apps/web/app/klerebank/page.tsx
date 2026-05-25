@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import {
   Package, CheckCircle2, Clock,
   ScanLine, Banknote, RefreshCw, ArrowRight,
-  Share2, Copy, CheckCheck, TrendingUp, Users,
+  Share2, Copy, CheckCheck, TrendingUp, Users, AlertTriangle,
 } from 'lucide-react';
 
 type WaybillCard = {
@@ -26,6 +26,21 @@ type Dashboard = {
   completedToday:      number;
   earningsThisMonth:   number;
   collectionsThisMonth: number;
+};
+
+type LedgerData = {
+  monthName:       string;
+  nextPayoutDate:  string;
+  daysToPayday:    number;
+  balance: {
+    directCents:     number;
+    referralCents:   number;
+    grandTotalCents: number;
+    status:          string;
+  };
+  bank: { bankName: string; accountHolderName: string; verified: boolean } | null;
+  recentEntries: { eventType: string; amountCents: number; waybillNumber: string | null; createdAt: string }[];
+  previousPayouts: { month: string; amountCents: number; status: string; processedAt: string | null }[];
 };
 
 type ReferralData = {
@@ -101,7 +116,91 @@ const TIER_COLOURS: Record<string, { bg: string; text: string; bar: string }> = 
 };
 
 
-function ReferralCard({ data }: { data: ReferralData }) {
+function PayoutSection({ ledger }: { ledger: LedgerData }) {
+  const bankOk      = ledger.bank?.verified === true;
+  const nextDate    = new Date(ledger.nextPayoutDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long' });
+  const eventLabel  = (t: string) => t === 'dropoff' ? 'Drop-off' : t === 'collection' ? 'Collection' : 'Delivery';
+
+  return (
+    <div className="space-y-4">
+      {/* Monthly balance */}
+      <div className="bg-white/5 rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Banknote size={15} className="text-[#BE1E2D]" />
+          <span className="text-white text-sm font-semibold">{ledger.monthName} balance</span>
+        </div>
+        <p className="text-white text-3xl font-bold mb-1">{fmtRands(ledger.balance.grandTotalCents)}</p>
+        <div className="flex gap-4 text-xs text-white/40">
+          <span>Waybill fees {fmtRands(ledger.balance.directCents)}</span>
+          {ledger.balance.referralCents > 0 && <span>Referrals {fmtRands(ledger.balance.referralCents)}</span>}
+        </div>
+      </div>
+
+      {/* Bank + payout date */}
+      <div className={`rounded-2xl p-5 ${bankOk ? 'bg-green-500/10' : 'bg-amber-500/10'}`}>
+        <div className="flex items-start gap-3">
+          {bankOk
+            ? <CheckCircle2 size={16} className="text-green-400 mt-0.5 shrink-0" />
+            : <AlertTriangle size={16} className="text-amber-400 mt-0.5 shrink-0" />}
+          <div className="flex-1 min-w-0">
+            {bankOk ? (
+              <>
+                <p className="text-green-400 text-sm font-semibold">Bank details on file</p>
+                <p className="text-white/50 text-xs mt-0.5">{ledger.bank!.bankName} · {ledger.bank!.accountHolderName}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-amber-400 text-sm font-semibold">Bank details missing</p>
+                <p className="text-white/50 text-xs mt-0.5">Your {ledger.monthName} balance will be held until verified bank details are on file.</p>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
+          <span className="text-white/40 text-xs">Next payout</span>
+          <span className="text-white text-xs font-semibold">{nextDate} · {ledger.daysToPayday}d away</span>
+        </div>
+      </div>
+
+      {/* Recent waybill entries */}
+      {ledger.recentEntries.length > 0 && (
+        <div className="bg-white/5 rounded-2xl overflow-hidden">
+          <p className="px-5 pt-4 pb-2 text-white/30 text-xs uppercase tracking-widest">Recent entries</p>
+          {ledger.recentEntries.slice(0, 8).map((e, i) => (
+            <div key={i} className="flex items-center px-5 py-3 border-b border-white/5 last:border-0">
+              <div className="flex-1 min-w-0">
+                <p className="text-white/70 text-xs">{eventLabel(e.eventType)}</p>
+                {e.waybillNumber && <p className="text-white/40 text-xs font-mono">{e.waybillNumber}</p>}
+              </div>
+              <span className="text-green-400 text-xs font-bold">+{fmtRands(e.amountCents)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Previous payouts */}
+      {ledger.previousPayouts.length > 0 && (
+        <div className="bg-white/5 rounded-2xl overflow-hidden">
+          <p className="px-5 pt-4 pb-2 text-white/30 text-xs uppercase tracking-widest">Previous payouts</p>
+          {ledger.previousPayouts.map((p, i) => (
+            <div key={i} className="flex items-center px-5 py-3 border-b border-white/5 last:border-0">
+              <div className="flex-1">
+                <p className="text-white/70 text-xs">{p.month}</p>
+              </div>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full mr-3 ${
+                p.status === 'paid' ? 'bg-green-500/20 text-green-400' :
+                p.status === 'held' ? 'bg-amber-500/20 text-amber-400' : 'bg-white/10 text-white/40'
+              }`}>{p.status}</span>
+              <span className="text-white text-xs font-bold">{fmtRands(p.amountCents)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReferralCard({ data, ledger }: { data: ReferralData; ledger?: LedgerData | null }) {
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -125,6 +224,9 @@ function ReferralCard({ data }: { data: ReferralData }) {
 
   return (
     <div className="space-y-4">
+
+      {/* Payout & balance — shown when ledger data available */}
+      {ledger && <PayoutSection ledger={ledger} />}
 
       {/* Tier badge + progress */}
       <div className={`${colours.bg} rounded-2xl p-5`}>
@@ -264,6 +366,7 @@ export default function KlerebankDashboardPage() {
   const router = useRouter();
   const [data,         setData]         = useState<Dashboard | null>(null);
   const [referralData, setReferralData] = useState<ReferralData | null>(null);
+  const [ledgerData,   setLedgerData]   = useState<LedgerData | null>(null);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState('');
   const [lastSync,     setLastSync]     = useState<Date>(new Date());
@@ -273,20 +376,26 @@ export default function KlerebankDashboardPage() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.push('/'); return; }
 
-    const token = session.access_token;
+    const token   = session.access_token;
     const headers = { Authorization: `Bearer ${token}` };
 
-    const [dashRes, refRes] = await Promise.all([
+    const [dashRes, refRes, ledgerRes] = await Promise.all([
       fetch('/api/klerebank/dashboard', { headers }),
       fetch('/api/klerebank/referrals',  { headers }),
+      fetch('/api/klerebank/ledger',     { headers }),
     ]);
 
     if (dashRes.status === 403) { router.push('/dashboard'); return; }
     if (!dashRes.ok) { setError('Failed to load dashboard'); setLoading(false); return; }
 
-    const [dashJson, refJson] = await Promise.all([dashRes.json(), refRes.ok ? refRes.json() : null]);
+    const [dashJson, refJson, ledgerJson] = await Promise.all([
+      dashRes.json(),
+      refRes.ok    ? refRes.json()    : null,
+      ledgerRes.ok ? ledgerRes.json() : null,
+    ]);
     setData(dashJson);
-    if (refJson) setReferralData(refJson);
+    if (refJson)    setReferralData(refJson);
+    if (ledgerJson) setLedgerData(ledgerJson);
     setLastSync(new Date());
     setLoading(false);
   }, [router]);
@@ -341,7 +450,7 @@ export default function KlerebankDashboardPage() {
             { label: 'Incoming',   value: data.incoming.length,   icon: <Clock size={16} className="text-amber-400" />,      bg: 'bg-amber-400/10' },
             { label: 'At hub',     value: data.atHub.length,      icon: <Package size={16} className="text-blue-400" />,     bg: 'bg-blue-400/10' },
             { label: 'Done today', value: data.completedToday,    icon: <CheckCircle2 size={16} className="text-green-400" />, bg: 'bg-green-400/10' },
-            { label: 'This month', value: fmtRands(data.earningsThisMonth), icon: <Banknote size={16} className="text-[#BE1E2D]" />, bg: 'bg-[#BE1E2D]/10' },
+            { label: 'This month', value: fmtRands(ledgerData?.balance.grandTotalCents ?? data.earningsThisMonth), icon: <Banknote size={16} className="text-[#BE1E2D]" />, bg: 'bg-[#BE1E2D]/10' },
           ].map(s => (
             <div key={s.label} className={`${s.bg} rounded-2xl p-3.5 text-center`}>
               <div className="flex justify-center mb-1.5">{s.icon}</div>
@@ -421,7 +530,7 @@ export default function KlerebankDashboardPage() {
         {/* Referrals tab */}
         {activeTab === 'referrals' && (
           referralData
-            ? <ReferralCard data={referralData} />
+            ? <ReferralCard data={referralData} ledger={ledgerData} />
             : (
               <div className="bg-white/5 rounded-2xl px-6 py-10 text-center">
                 <p className="text-white/40 text-sm">Referral data unavailable</p>

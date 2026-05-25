@@ -9,7 +9,7 @@ import { supabase } from '@/src/lib/supabase';
 import { WEB_API_BASE } from '@/src/lib/api';
 import {
   ScanLine, Package, Clock, CheckCircle2, ArrowRight,
-  Share2, TrendingUp, Users,
+  Share2, TrendingUp, Users, Banknote, AlertTriangle,
 } from 'lucide-react-native';
 
 const CRIMSON = '#BE1E2D';
@@ -31,6 +31,16 @@ type Dashboard = {
   completedToday:       number;
   earningsThisMonth:    number;
   collectionsThisMonth: number;
+};
+
+type LedgerData = {
+  monthName:      string;
+  nextPayoutDate: string;
+  daysToPayday:   number;
+  balance: { directCents: number; referralCents: number; grandTotalCents: number; status: string };
+  bank: { bankName: string; accountHolderName: string; verified: boolean } | null;
+  recentEntries: { eventType: string; amountCents: number; waybillNumber: string | null; createdAt: string }[];
+  previousPayouts: { month: string; amountCents: number; status: string }[];
 };
 
 type ReferralData = {
@@ -104,7 +114,7 @@ function WaybillRow({ card, type }: { card: WaybillCard; type: 'incoming' | 'atH
   );
 }
 
-function ReferralTab({ data }: { data: ReferralData }) {
+function ReferralTab({ data, ledger }: { data: ReferralData; ledger?: LedgerData | null }) {
   const colours = TIER_COLOURS[data.tier.name] ?? TIER_COLOURS.Seedling;
   const current  = data.tier.directCount;
   const total    = current + data.tier.toNextTier;
@@ -118,8 +128,67 @@ function ReferralTab({ data }: { data: ReferralData }) {
     });
   };
 
+  const nextDate  = ledger ? new Date(ledger.nextPayoutDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long' }) : null;
+  const bankOk    = ledger?.bank?.verified === true;
+
   return (
     <View style={{ gap: 14 }}>
+
+      {/* Payout & balance */}
+      {ledger && (
+        <>
+          <View style={styles.refCard}>
+            <View style={styles.refCardRow}>
+              <Banknote size={14} color={CRIMSON} strokeWidth={2} />
+              <Text style={styles.refCardTitle}>{ledger.monthName} balance</Text>
+            </View>
+            <Text style={[styles.earningValue, { fontSize: 26 }]}>{fmtRands(ledger.balance.grandTotalCents)}</Text>
+            <View style={{ flexDirection: 'row', gap: 16 }}>
+              <Text style={styles.refCardLabel}>Fees {fmtRands(ledger.balance.directCents)}</Text>
+              {ledger.balance.referralCents > 0 && (
+                <Text style={styles.refCardLabel}>Referrals {fmtRands(ledger.balance.referralCents)}</Text>
+              )}
+            </View>
+          </View>
+
+          <View style={[styles.refCard, { backgroundColor: bankOk ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)' }]}>
+            <View style={styles.refCardRow}>
+              {bankOk
+                ? <CheckCircle2 size={14} color="#4ade80" strokeWidth={2} />
+                : <AlertTriangle size={14} color="#fbbf24" strokeWidth={2} />}
+              <Text style={[styles.refCardTitle, { color: bankOk ? '#4ade80' : '#fbbf24' }]}>
+                {bankOk ? `${ledger.bank!.bankName} · verified` : 'Bank details missing'}
+              </Text>
+            </View>
+            {!bankOk && (
+              <Text style={[styles.refCardLabel, { marginTop: 4 }]}>
+                Your {ledger.monthName} earnings will be held until verified bank details are on file.
+              </Text>
+            )}
+            {nextDate && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' }}>
+                <Text style={styles.refCardLabel}>Next payout</Text>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>{nextDate} · {ledger.daysToPayday}d</Text>
+              </View>
+            )}
+          </View>
+
+          {ledger.recentEntries.length > 0 && (
+            <View style={[styles.section, { backgroundColor: 'rgba(255,255,255,0.06)' }]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: 'rgba(255,255,255,0.3)', fontSize: 9, letterSpacing: 1 }]}>RECENT ENTRIES</Text>
+              </View>
+              {ledger.recentEntries.slice(0, 6).map((e, i) => (
+                <View key={i} style={styles.earningRow}>
+                  <Text style={styles.earningLevel}>{e.eventType === 'dropoff' ? 'Drop' : e.eventType === 'collection' ? 'Coll' : 'Del'}</Text>
+                  <Text style={styles.earningWaybill} numberOfLines={1}>{e.waybillNumber ?? '—'}</Text>
+                  <Text style={styles.earningAmount}>+{fmtRands(e.amountCents)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </>
+      )}
 
       {/* Tier card */}
       <View style={styles.refCard}>
@@ -230,6 +299,7 @@ export default function KlerebankScreen() {
   const router = useRouter();
   const [data,         setData]         = useState<Dashboard | null>(null);
   const [referralData, setReferralData] = useState<ReferralData | null>(null);
+  const [ledgerData,   setLedgerData]   = useState<LedgerData | null>(null);
   const [loading,      setLoading]      = useState(true);
   const [refreshing,   setRefreshing]   = useState(false);
   const [error,        setError]        = useState('');
@@ -243,17 +313,23 @@ export default function KlerebankScreen() {
     const token   = session.access_token;
     const headers = { Authorization: `Bearer ${token}` };
 
-    const [dashRes, refRes] = await Promise.all([
+    const [dashRes, refRes, ledgerRes] = await Promise.all([
       fetch(`${WEB_API_BASE}/api/klerebank/dashboard`, { headers }),
       fetch(`${WEB_API_BASE}/api/klerebank/referrals`,  { headers }),
+      fetch(`${WEB_API_BASE}/api/klerebank/ledger`,     { headers }),
     ]);
 
     if (dashRes.status === 403) { router.replace('/(tabs)' as never); return; }
     if (!dashRes.ok) { setError('Could not load dashboard'); setLoading(false); setRefreshing(false); return; }
 
-    const [dashJson, refJson] = await Promise.all([dashRes.json(), refRes.ok ? refRes.json() : null]);
+    const [dashJson, refJson, ledgerJson] = await Promise.all([
+      dashRes.json(),
+      refRes.ok    ? refRes.json()    : null,
+      ledgerRes.ok ? ledgerRes.json() : null,
+    ]);
     setData(dashJson);
-    if (refJson) setReferralData(refJson);
+    if (refJson)    setReferralData(refJson);
+    if (ledgerJson) setLedgerData(ledgerJson);
     setLoading(false);
     setRefreshing(false);
   }, []);
@@ -303,7 +379,7 @@ export default function KlerebankScreen() {
             { label: 'Incoming',   value: String(data.incoming.length),     color: '#fbbf24' },
             { label: 'At hub',     value: String(data.atHub.length),        color: '#60a5fa' },
             { label: 'Done today', value: String(data.completedToday),      color: '#4ade80' },
-            { label: 'This month', value: fmtRands(data.earningsThisMonth), color: CRIMSON },
+            { label: 'This month', value: fmtRands(ledgerData?.balance.grandTotalCents ?? data.earningsThisMonth), color: CRIMSON },
           ].map(s => (
             <View key={s.label} style={styles.statCard}>
               <Text style={[styles.statValue, { color: s.color }]}>{s.value}</Text>
@@ -367,7 +443,7 @@ export default function KlerebankScreen() {
         {/* Referrals tab */}
         {activeTab === 'referrals' && (
           referralData
-            ? <ReferralTab data={referralData} />
+            ? <ReferralTab data={referralData} ledger={ledgerData} />
             : (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyText}>Referral data unavailable</Text>

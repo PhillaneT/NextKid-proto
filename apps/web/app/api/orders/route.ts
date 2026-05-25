@@ -190,13 +190,26 @@ export async function POST(req: NextRequest) {
   // 8. Credit school ledger R10 for school delivery (on order CREATION — locked in at checkout)
   // RULE: delivery_school_id is the single source of truth — never changes after this point
   if (isSchoolDelivery && deliverySchoolId) {
+    const now2 = new Date()
+    const month = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}`
+
     await serverClient.from('school_ledger').upsert({
       school_id:    deliverySchoolId,
       order_id:     order.id,
-      admin_id:     buyerId,          // attributed to buyer's session for traceability
+      admin_id:     buyerId,
       event_type:   'delivery',
       amount_cents: SCHOOL_KLEREBANK_SPLIT,
+      month,
+      // waybill_number: null — waybill not yet issued at order creation
     }, { onConflict: 'order_id,event_type', ignoreDuplicates: true })
+
+    // Update monthly summary (+R10 direct) — fire-and-forget, tolerates migration not yet run
+    serverClient.rpc('increment_school_ledger_summary', {
+      p_school_id:      deliverySchoolId,
+      p_month:          month,
+      p_direct_cents:   SCHOOL_KLEREBANK_SPLIT,
+      p_referral_cents: 0,
+    }).then().catch(err => console.error('[Ledger] delivery summary error:', err))
   }
 
   return NextResponse.json({

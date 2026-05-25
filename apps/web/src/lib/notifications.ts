@@ -331,6 +331,38 @@ export async function sendOrderNotification({ orderId, newStatus }: Notification
   console.log(`[Notifications] ✅ Sent for order ${orderId.slice(0, 8)} → ${newStatus}`)
 }
 
+// ── Ledger credit notification — fires after each waybill closes ──────────────
+
+export async function sendLedgerCreditNotification(
+  schoolId:      string,
+  waybillNumber: string,
+  newTotalCents: number,
+  monthName:     string,
+) {
+  const server   = createServerSupabaseClient()
+  const totalStr = `R ${(newTotalCents / 100).toFixed(2)}`
+  const pushMsg  = `${waybillNumber} closed. R10 added to your ${monthName} balance. Running total: ${totalStr}.`
+
+  const { data: admins } = await server
+    .from('school_admins')
+    .select('profiles(id, expo_push_token)')
+    .eq('school_id', schoolId)
+    .eq('active', true)
+
+  for (const row of admins ?? []) {
+    const prof = row.profiles as unknown as { id: string; expo_push_token: string | null } | null
+    if (!prof) continue
+    if (prof.expo_push_token?.startsWith('ExponentPushToken')) {
+      await sendPush(prof.expo_push_token, 'NextKid Hub', pushMsg)
+    }
+    await server.from('notifications').insert({
+      user_id: prof.id, order_id: null, type: 'ledger_credit',
+      message: pushMsg, item_id: null, read: false,
+      sent_at: new Date().toISOString(),
+    })
+  }
+}
+
 // ── Nudge uncollected buyers (called by cron / scheduled job) ─────────────────
 
 export async function nudgeUncollectedBuyers() {

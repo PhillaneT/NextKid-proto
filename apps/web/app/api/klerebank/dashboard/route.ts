@@ -84,18 +84,31 @@ export async function GET(req: NextRequest) {
     .gte('collected_at', todayStart.toISOString())
     .in('listing_id', listingIds)
 
-  // Admin's earnings this month from school_ledger
-  const monthStart = new Date()
-  monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
+  // School's earnings this month — uses school_ledger_summary (grand total: direct + referral).
+  // Falls back to summing school_ledger directly if migration 023 hasn't run yet.
+  const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
 
-  const { data: ledger } = await server
-    .from('school_ledger')
-    .select('amount_cents, event_type, created_at')
-    .eq('admin_id', userData.user.id)
-    .gte('created_at', monthStart.toISOString())
+  const { data: summary } = await server
+    .from('school_ledger_summary')
+    .select('grand_total_cents, direct_earnings_cents')
+    .eq('school_id', schoolId)
+    .eq('month', currentMonth)
+    .maybeSingle()
 
-  const earningsThisMonth = (ledger ?? []).reduce((s, r) => s + r.amount_cents, 0)
-  const collectionsThisMonth = (ledger ?? []).filter(r => r.event_type === 'collection').length
+  let earningsThisMonth    = summary?.grand_total_cents ?? 0
+  let collectionsThisMonth = 0
+
+  if (!summary) {
+    // Fallback: query school_ledger by school_id (not admin_id)
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
+    const { data: ledger } = await server
+      .from('school_ledger')
+      .select('amount_cents, event_type')
+      .eq('school_id', schoolId)
+      .gte('created_at', monthStart.toISOString())
+    earningsThisMonth    = (ledger ?? []).reduce((s, r) => s + r.amount_cents, 0)
+    collectionsThisMonth = (ledger ?? []).filter(r => r.event_type === 'collection').length
+  }
 
   // Format — only waybill-safe fields
   const formatIncoming = (rows: typeof incoming) => (rows ?? []).map(o => ({

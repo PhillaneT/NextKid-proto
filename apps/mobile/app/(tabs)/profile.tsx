@@ -8,7 +8,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
 import {
   MapPin, School, CheckCircle2, Tag,
-  ShoppingBag, Package, ChevronRight, Pencil, X, Check, Plus,
+  ShoppingBag, Package, ChevronRight, Pencil, X, Check, Plus, Baby,
 } from 'lucide-react-native';
 import { SA_PROVINCES } from '@nextkid/shared';
 import { WEB_API_BASE } from '@/src/lib/api';
@@ -496,6 +496,10 @@ export default function ProfileScreen() {
                 <Text style={[styles.scanBtnText, { color: '#fff' }]}>🏫 Hub Mode</Text>
               </TouchableOpacity>
             )}
+            <TouchableOpacity style={styles.childrenBtn} onPress={() => router.push('/children' as never)}>
+              <Baby size={14} strokeWidth={2} color="#111" />
+              <Text style={styles.childrenBtnText}>My Children</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.signOutBtn} onPress={signOut}>
               <Text style={styles.signOutText}>Sign out</Text>
             </TouchableOpacity>
@@ -723,4 +727,6 @@ const styles = StyleSheet.create({
 
   scanBtn:     { flex: 1, borderWidth: 1, borderColor: '#111', borderRadius: 30, paddingVertical: 10, alignItems: 'center' },
   scanBtnText: { color: '#111', fontWeight: '600', fontSize: 14 },
+  childrenBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: '#111', borderRadius: 30, paddingVertical: 10 },
+  childrenBtnText: { color: '#111', fontWeight: '600', fontSize: 14 },
 });

@@ -204,12 +204,12 @@ export async function POST(req: NextRequest) {
     }, { onConflict: 'order_id,event_type', ignoreDuplicates: true })
 
     // Update monthly summary (+R10 direct) — fire-and-forget, tolerates migration not yet run
-    serverClient.rpc('increment_school_ledger_summary', {
+    void Promise.resolve(serverClient.rpc('increment_school_ledger_summary', {
       p_school_id:      deliverySchoolId,
       p_month:          month,
       p_direct_cents:   SCHOOL_KLEREBANK_SPLIT,
       p_referral_cents: 0,
-    }).then().catch(err => console.error('[Ledger] delivery summary error:', err))
+    })).catch(err => console.error('[Ledger] delivery summary error:', err))
   }
 
   return NextResponse.json({

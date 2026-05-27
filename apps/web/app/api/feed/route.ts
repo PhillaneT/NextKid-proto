@@ -221,12 +221,12 @@ export async function GET(req: NextRequest) {
 
   // Persist to cache (upsert — fire and forget on error)
   const expiresAt = new Date(now.getTime() + CACHE_TTL_MS).toISOString()
-  server.from('user_feed_cache').upsert({
+  void Promise.resolve(server.from('user_feed_cache').upsert({
     user_id:      user.id,
     feed_json:    feed,
     generated_at: now.toISOString(),
     expires_at:   expiresAt,
-  }, { onConflict: 'user_id' }).then(() => {}).catch(() => {})
+  }, { onConflict: 'user_id' })).catch(() => {})
 
   return NextResponse.json({ ...feed, fromCache: false })
 }

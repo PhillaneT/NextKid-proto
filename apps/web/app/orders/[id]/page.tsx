@@ -164,64 +164,49 @@ function QrPanel({
   )
 }
 
-// ── Demo payment form ─────────────────────────────────────────────────────────
+// ── Stitch payment panel ──────────────────────────────────────────────────────
+//
+// Calls /api/orders/:id/pay → receives a Stitch-hosted checkout URL → redirects
+// the buyer. Order stays PENDING_PAYMENT until the Stitch webhook confirms.
 
-function DemoPaymentForm({
-  order,
-  onPaid,
-}: {
-  order: Order;
-  onPaid: () => void;
-}) {
-  const [paying, setPaying] = useState(false);
-  const [error, setError] = useState('');
-
-  // Pre-filled Stitch test card details
-  const [cardNumber] = useState('4111 1111 1111 1111');
-  const [expiry]     = useState('12/28');
-  const [cvv]        = useState('123');
-  const [name,    setName]    = useState('');
+function StitchPaymentPanel({ order }: { order: Order }) {
+  const [initiating, setInitiating] = useState(false);
+  const [error, setError]           = useState('');
 
   async function handlePay() {
-    if (!name.trim()) { setError('Please enter the name on the card.'); return; }
-    setPaying(true);
+    setInitiating(true);
     setError('');
 
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { setError('Session expired — please sign in again.'); setPaying(false); return; }
+    if (!session) {
+      setError('Session expired — please sign in again.');
+      setInitiating(false);
+      return;
+    }
 
-    const res = await fetch(`/api/orders/${order.id}/pay`, {
-      method: 'POST',
+    const res  = await fetch(`/api/orders/${order.id}/pay`, {
+      method:  'POST',
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
     const json = await res.json();
 
     if (!res.ok) {
-      setError(json.error === 'order_not_payable'
-        ? 'This order has already been paid.'
-        : 'Payment failed — please try again.');
-      setPaying(false);
+      setError(
+        json.error === 'order_not_payable'
+          ? 'This order has already been paid.'
+          : json.message ?? 'Payment unavailable — please try again.',
+      );
+      setInitiating(false);
       return;
     }
 
-    onPaid();
+    // Redirect to Stitch-hosted checkout page
+    window.location.href = json.redirectUrl;
   }
 
   return (
     <div className="space-y-5">
-      {/* Demo mode banner */}
-      <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-2xl">
-        <AlertTriangle size={16} strokeWidth={2} className="text-amber-600 shrink-0 mt-0.5" />
-        <div>
-          <p className="text-xs font-semibold text-amber-700">Demo mode — test payment</p>
-          <p className="text-xs text-amber-600 mt-0.5">
-            Card details are pre-filled with Stitch test credentials.
-            No real money will be charged. Real Stitch payment will replace this.
-          </p>
-        </div>
-      </div>
-
-      {/* Amount due */}
+      {/* Amount summary */}
       <div className="bg-[#f4f4f4] rounded-2xl px-5 py-4">
         <p className="text-xs text-[#979797] font-semibold uppercase tracking-wide mb-3">Amount due</p>
         <div className="space-y-2">
@@ -230,7 +215,9 @@ function DemoPaymentForm({
             <span className="text-[#111] font-medium">{fmt(order.item_price_cents)}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-[#555]">Shipping ({order.shipping_method ? SHIPPING_LABELS[order.shipping_method] ?? order.shipping_method : ''})</span>
+            <span className="text-[#555]">
+              Shipping{order.shipping_method ? ` (${SHIPPING_LABELS[order.shipping_method] ?? order.shipping_method})` : ''}
+            </span>
             <span className="text-[#111] font-medium">{fmt(order.shipping_cost_cents)}</span>
           </div>
           <div className="flex justify-between text-sm font-bold pt-2 border-t border-[#dedede]">
@@ -240,75 +227,40 @@ function DemoPaymentForm({
         </div>
       </div>
 
-      {/* Card form */}
-      <div className="bg-white border border-[#dedede] rounded-2xl p-5 space-y-4">
-        <div className="flex items-center gap-2 mb-1">
-          <Lock size={14} strokeWidth={2} className="text-[#BE1E2D]" />
-          <p className="text-xs font-semibold text-[#979797] uppercase tracking-wide">Card details</p>
+      {error && (
+        <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+          <AlertTriangle size={14} strokeWidth={2} className="text-red-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-red-600">{error}</p>
         </div>
+      )}
 
-        <div>
-          <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Card number</label>
-          <input
-            value={cardNumber}
-            readOnly
-            className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-2.5 text-[#555] text-sm font-mono tracking-widest cursor-not-allowed"
-          />
-        </div>
+      {/* Pay button */}
+      <button
+        onClick={handlePay}
+        disabled={initiating}
+        className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white font-bold rounded-full transition flex items-center justify-center gap-2 text-base"
+      >
+        {initiating ? (
+          <>
+            <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            Redirecting to Stitch…
+          </>
+        ) : (
+          <>
+            <Lock size={16} strokeWidth={2.5} />
+            Pay {fmt(order.total_paid_cents)} with Stitch
+          </>
+        )}
+      </button>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Expiry</label>
-            <input
-              value={expiry}
-              readOnly
-              className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-2.5 text-[#555] text-sm font-mono cursor-not-allowed"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">CVV</label>
-            <input
-              value={cvv}
-              readOnly
-              className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-2.5 text-[#555] text-sm font-mono cursor-not-allowed"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-[#979797] uppercase tracking-wide mb-1.5">Name on card</label>
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="e.g. Phillane Visagie"
-            className="w-full bg-white border border-[#dedede] rounded-xl px-4 py-2.5 text-[#111] text-sm focus:outline-none focus:border-[#BE1E2D] transition"
-          />
-        </div>
-
-        {error && <p className="text-red-500 text-sm">{error}</p>}
-
-        <button
-          onClick={handlePay}
-          disabled={paying}
-          className="w-full py-3.5 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white font-bold rounded-full transition flex items-center justify-center gap-2"
-        >
-          {paying ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              Processing...
-            </>
-          ) : (
-            <>
-              <Lock size={15} strokeWidth={2.5} />
-              Pay {fmt(order.total_paid_cents)} securely
-            </>
-          )}
-        </button>
-
-        <div className="flex items-center justify-center gap-1.5 pt-1">
+      <div className="flex flex-col items-center gap-1 pt-1">
+        <div className="flex items-center gap-1.5">
           <ShieldCheck size={13} strokeWidth={2} className="text-[#979797]" />
-          <p className="text-xs text-[#979797]">Funds held safely · Released only after you confirm receipt</p>
+          <p className="text-xs text-[#979797]">Secured by Stitch · Released only after you confirm receipt</p>
         </div>
+        <p className="text-[11px] text-[#c0c0c0]">
+          You will be redirected to Stitch to complete payment via instant EFT or card.
+        </p>
       </div>
     </div>
   );
@@ -515,9 +467,9 @@ export default function OrderDetailPage() {
 
         {/* ── State-specific content ─────────────────────────────────────────── */}
 
-        {/* PENDING_PAYMENT: demo payment form */}
+        {/* PENDING_PAYMENT: Stitch payment */}
         {isPending && (
-          <DemoPaymentForm order={order} onPaid={() => load()} />
+          <StitchPaymentPanel order={order} />
         )}
 
         {/* AWAITING_DROPOFF: seller sees DROP-OFF QR, buyer sees waiting message */}

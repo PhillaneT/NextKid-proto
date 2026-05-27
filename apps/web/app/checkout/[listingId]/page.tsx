@@ -531,13 +531,15 @@ export default function CheckoutPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
             <span style={{ fontSize: '14px', color: '#555' }}>Shipping</span>
             <span style={{ fontSize: '14px', color: '#1a1a2e', fontWeight: 500 }}>
-              {selectedQuote ? formatRandFloat(selectedQuote.rate) : '—'}
+              {deliveryType === 'school'
+                ? formatRands(SCHOOL_FEE_CENTS)
+                : selectedQuote ? formatRandFloat(selectedQuote.rate) : '—'}
             </span>
           </div>
           <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: '12px', display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: '16px', fontWeight: 700, color: '#1a1a2e' }}>Total</span>
             <span style={{ fontSize: '16px', fontWeight: 700, color: '#BE1E2D' }}>
-              {selectedQuote ? formatRands(totalCents) : '—'}
+              {deliveryType === 'school' || selectedQuote ? formatRands(totalCents) : '—'}
             </span>
           </div>
         </div>
@@ -545,10 +547,10 @@ export default function CheckoutPage() {
         {/* Confirm button */}
         <button
           onClick={handleConfirmOrder}
-          disabled={!selectedQuote || step === 'placing'}
+          disabled={(deliveryType === 'courier' && !selectedQuote) || step === 'placing'}
           style={{
             width: '100%',
-            background: selectedQuote ? '#BE1E2D' : '#c0c0c0',
+            background: (deliveryType === 'school' || selectedQuote) ? '#BE1E2D' : '#c0c0c0',
             color: '#fff',
             border: 'none',
             borderRadius: '14px',

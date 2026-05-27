@@ -78,12 +78,6 @@ export default function Navbar() {
             <NavTab label="Sell" active={isActive('/sell')} onClick={() => router.push('/sell/new')} />
           )}
           {isLoggedIn && (
-            <NavTab label="Orders" active={isActive('/orders')} onClick={() => router.push('/orders')} />
-          )}
-          {isLoggedIn && (
-            <NavTab label="My Children" active={isActive('/children')} onClick={() => router.push('/children')} />
-          )}
-          {isLoggedIn && (
             <NavTab label="Profile" active={isActive('/profile')} onClick={() => router.push('/profile')} />
           )}
         </nav>

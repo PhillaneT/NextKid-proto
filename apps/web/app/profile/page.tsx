@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   MapPin, School, CheckCircle2, Package,
   Tag, Clock, ShoppingBag, Pencil, X, Check, Home, Search, LocateFixed,
+  Baby,
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -101,6 +102,13 @@ export default function ProfilePage() {
   const [soldListings, setSoldListings]     = useState<ListingItem[]>([]);
   const [loading, setLoading]               = useState(true);
   const [tab, setTab]                       = useState<'active' | 'sold'>('active');
+  const [ordersCount, setOrdersCount]       = useState(0);
+  const [childrenCount, setChildrenCount]   = useState(0);
+  const [showSchools, setShowSchools]       = useState(false);
+  const [showListings, setShowListings]     = useState(false);
+
+  const schoolsRef  = useRef<HTMLDivElement>(null);
+  const listingsRef = useRef<HTMLDivElement>(null);
 
   // ── Address edit state ────────────────────────────────────────────────────────
   const [editingAddress, setEditingAddress] = useState(false);
@@ -153,16 +161,23 @@ export default function ProfilePage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/'); return; }
 
-    const [{ data: prof }, { data: items }] = await Promise.all([
+    const [{ data: prof }, { data: items }, { count: oCount }, { count: cCount }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', user.id).single(),
       supabase.from('listings')
         .select('id, title, price_cents, images, status, category, created_at')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false }),
+      supabase.from('orders').select('*', { count: 'exact', head: true })
+        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+        .not('status', 'in', '(COMPLETED,CANCELLED,AUTO_CANCELLED)'),
+      supabase.from('child_profiles').select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id).is('deleted_at', null),
     ]);
 
     if (!prof) { router.push('/onboarding'); return; }
     setProfile(prof);
+    setOrdersCount(oCount ?? 0);
+    setChildrenCount(cCount ?? 0);
 
     if (prof.school_ids?.length) {
       const { data: schoolData } = await supabase
@@ -427,6 +442,26 @@ export default function ProfilePage() {
               Sign out
             </button>
           </div>
+        </div>
+
+        {/* ── Quick nav ────────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-4 gap-2">
+          {([
+            { icon: <ShoppingBag size={14} strokeWidth={2} />, label: 'Orders',      sub: ordersCount > 0 ? `${ordersCount} active` : 'View all',        action: () => router.push('/orders') },
+            { icon: <Baby        size={14} strokeWidth={2} />, label: 'My Children', sub: childrenCount > 0 ? `${childrenCount} added` : 'Add child',     action: () => router.push('/children') },
+            { icon: <School      size={14} strokeWidth={2} />, label: 'My Schools',  sub: schools.length > 0 ? `${schools.length} followed` : 'Add school', action: () => { setShowSchools(v => !v); setTimeout(() => schoolsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); } },
+            { icon: <Tag         size={14} strokeWidth={2} />, label: 'My Listings', sub: `${activeListings.length} live · ${soldListings.length} sold`,   action: () => { setShowListings(v => !v); setTimeout(() => listingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); } },
+          ] as const).map(({ icon, label, sub, action }) => (
+            <button
+              key={label}
+              onClick={action}
+              className="group flex flex-col items-start gap-0.5 bg-[#6B6B6B] hover:bg-[#BE1E2D] rounded-xl px-3 py-2 transition text-left"
+            >
+              <span className="text-white mb-0.5">{icon}</span>
+              <span className="text-white text-[11px] font-bold leading-tight">{label}</span>
+              <span className="text-white/60 group-hover:text-white/80 text-[10px] leading-tight transition">{sub}</span>
+            </button>
+          ))}
         </div>
 
         {/* ── Delivery Address card ────────────────────────────────────────────── */}
@@ -739,10 +774,8 @@ export default function ProfilePage() {
         </div>
 
         {/* ── My Schools card ──────────────────────────────────────────────────── */}
-        {/* RULE: schools are independent of delivery location. A parent or student  */}
-        {/* can follow schools in any province. The homepage shows items from all    */}
-        {/* followed schools, sorted by newest.                                      */}
-        <div className="bg-[#f4f4f4] rounded-3xl p-6">
+        {showSchools && (
+        <div ref={schoolsRef} className="bg-[#f4f4f4] rounded-3xl p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-base font-bold text-[#111]">My Schools</h2>
@@ -855,8 +888,10 @@ export default function ProfilePage() {
             </div>
           )}
         </div>
+        )}
 
-        {/* ── Stats row ────────────────────────────────────────────────────────── */}
+        {/* ── Stats + Listings (toggled by My Listings button) ─────────────────── */}
+        {showListings && (<div ref={listingsRef}>
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-[#f4f4f4] rounded-2xl p-4 text-center">
             <p className="text-2xl font-bold text-[#BE1E2D]">{activeListings.length}</p>
@@ -875,7 +910,7 @@ export default function ProfilePage() {
         </div>
 
         {/* ── Listings tabs ─────────────────────────────────────────────────────── */}
-        <div>
+        <div ref={listingsRef}>
           <div className="flex border-b border-[#dedede] mb-6">
             {(['active', 'sold'] as const).map(t => (
               <button
@@ -915,6 +950,7 @@ export default function ProfilePage() {
             </div>
           )}
         </div>
+        </div>)}
 
       </div>
     </div>

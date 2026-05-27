@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Alert, Image, Modal,
+  View, Text, ScrollView, TouchableOpacity,
+  StyleSheet, ActivityIndicator, Alert, Image, Modal, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -72,45 +72,55 @@ function timelineIdx(status: string) {
   return TIMELINE.findIndex(s => s.statuses.includes(status));
 }
 
-// ── Demo payment form ─────────────────────────────────────────────────────────
+// ── Stitch payment panel ──────────────────────────────────────────────────────
+//
+// Calls /api/orders/:id/pay → receives Stitch-hosted checkout URL → opens it
+// in the device browser. Order stays PENDING_PAYMENT until Stitch webhook fires.
 
-function DemoPayForm({ order, onPaid }: { order: Order; onPaid: () => void }) {
-  const [name, setName]     = useState('');
-  const [paying, setPaying] = useState(false);
+function StitchPayMobilePanel({ order }: { order: Order }) {
+  const [initiating, setInitiating] = useState(false);
+  const [error, setError]           = useState('');
 
   const handlePay = async () => {
-    if (!name.trim()) { Alert.alert('Required', 'Please enter the name on the card.'); return; }
-    setPaying(true);
+    setInitiating(true);
+    setError('');
 
-    // RULE: call the API so waybill + DROP-OFF QR are generated server-side
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { Alert.alert('Session expired'); setPaying(false); return; }
+    if (!session) {
+      Alert.alert('Session expired', 'Please sign in again.');
+      setInitiating(false);
+      return;
+    }
 
-    const res = await fetch(`${WEB_API_BASE}/api/orders/${order.id}/pay`, {
-      method: 'POST',
+    const res  = await fetch(`${WEB_API_BASE}/api/orders/${order.id}/pay`, {
+      method:  'POST',
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
-    setPaying(false);
-    if (!res.ok) { Alert.alert('Payment failed', 'Please try again.'); return; }
-    onPaid();
+    const json = await res.json();
+
+    if (!res.ok) {
+      setError(
+        json.error === 'order_not_payable'
+          ? 'This order has already been paid.'
+          : json.message ?? 'Payment unavailable — please try again.',
+      );
+      setInitiating(false);
+      return;
+    }
+
+    // Open Stitch-hosted checkout in the device browser
+    await Linking.openURL(json.redirectUrl);
+    setInitiating(false);
   };
 
   return (
     <View style={styles.section}>
-      {/* Demo banner */}
-      <View style={styles.warningBox}>
-        <AlertTriangle size={15} strokeWidth={2} color="#92400e" />
-        <Text style={styles.warningText}>
-          Demo mode — no real money charged. Pre-filled test card details.
-        </Text>
-      </View>
-
-      {/* Amount */}
+      {/* Amount summary */}
       <View style={styles.summaryBox}>
         <Text style={styles.sectionLabel}>Amount due</Text>
         {[
           ['Item', fmt(order.item_price_cents)],
-          [`Shipping (${order.shipping_method ? SHIPPING_LABELS[order.shipping_method] ?? order.shipping_method : ''})`, fmt(order.shipping_cost_cents)],
+          [`Shipping${order.shipping_method ? ` (${SHIPPING_LABELS[order.shipping_method] ?? order.shipping_method})` : ''}`, fmt(order.shipping_cost_cents)],
         ].map(([label, value]) => (
           <View key={label} style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>{label}</Text>
@@ -123,51 +133,27 @@ function DemoPayForm({ order, onPaid }: { order: Order; onPaid: () => void }) {
         </View>
       </View>
 
-      {/* Card form */}
-      <View style={styles.cardForm}>
-        <View style={styles.cardFormHeader}>
-          <Lock size={13} strokeWidth={2} color={CRIMSON} />
-          <Text style={styles.sectionLabel}>Card details</Text>
+      {!!error && (
+        <View style={[styles.warningBox, { backgroundColor: '#fef2f2', borderColor: '#fecaca' }]}>
+          <AlertTriangle size={15} strokeWidth={2} color="#dc2626" />
+          <Text style={[styles.warningText, { color: '#dc2626' }]}>{error}</Text>
         </View>
-        {[
-          { label: 'Card number', value: '4111 1111 1111 1111', editable: false },
-          { label: 'Expiry',      value: '12/28',               editable: false },
-          { label: 'CVV',         value: '123',                  editable: false },
-        ].map(f => (
-          <View key={f.label} style={{ marginBottom: 10 }}>
-            <Text style={styles.inputLabel}>{f.label}</Text>
-            <TextInput
-              style={[styles.input, { color: '#979797' }]}
-              value={f.value}
-              editable={false}
-            />
-          </View>
-        ))}
-        <Text style={styles.inputLabel}>Name on card</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="e.g. Pearl Mahlanga"
-          placeholderTextColor="#979797"
-          autoCapitalize="words"
-        />
+      )}
 
-        <TouchableOpacity
-          style={[styles.primaryBtn, paying && styles.btnDisabled]}
-          onPress={handlePay}
-          disabled={paying}
-        >
-          {paying
-            ? <ActivityIndicator color="#fff" />
-            : <><Lock size={15} strokeWidth={2.5} color="#fff" /><Text style={styles.primaryBtnText}>Pay {fmt(order.total_paid_cents)} securely</Text></>
-          }
-        </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.primaryBtn, initiating && styles.btnDisabled]}
+        onPress={handlePay}
+        disabled={initiating}
+      >
+        {initiating
+          ? <ActivityIndicator color="#fff" />
+          : <><Lock size={15} strokeWidth={2.5} color="#fff" /><Text style={styles.primaryBtnText}>Pay {fmt(order.total_paid_cents)} with Stitch</Text></>
+        }
+      </TouchableOpacity>
 
-        <View style={styles.escrowNote}>
-          <ShieldCheck size={12} strokeWidth={2} color="#979797" />
-          <Text style={styles.escrowText}>Funds held safely · Released after you confirm receipt</Text>
-        </View>
+      <View style={styles.escrowNote}>
+        <ShieldCheck size={12} strokeWidth={2} color="#979797" />
+        <Text style={styles.escrowText}>Secured by Stitch · Released only after you confirm receipt</Text>
       </View>
     </View>
   );
@@ -448,7 +434,7 @@ export default function OrderDetailScreen() {
 
         {/* State-specific panels */}
 
-        {isPending && <DemoPayForm order={order} onPaid={load} />}
+        {isPending && <StitchPayMobilePanel order={order} />}
 
         {/* AWAITING_DROPOFF: seller shows DROP-OFF QR, buyer waits */}
         {isAwaitingDropoff && isSeller && (

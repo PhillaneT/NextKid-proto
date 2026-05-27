@@ -42,3 +42,5 @@ ALTER TABLE user_feed_cache ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users manage own feed cache" ON user_feed_cache FOR ALL
   USING (user_id = auth.uid());
+    
+    

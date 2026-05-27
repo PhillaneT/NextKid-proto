@@ -17,7 +17,8 @@ async function resolveUser(req: NextRequest) {
   return data.user ?? null
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const { data: child } = await server
     .from('child_profiles')
     .select('id, gender, dob')
-    .eq('id', params.id)
+    .eq('id', id)
     .eq('user_id', user.id)
     .is('deleted_at', null)
     .single()
@@ -47,13 +48,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     server
       .from('child_sizes')
       .select('top_size, bottom_size, shoe_size, recorded_date')
-      .eq('child_id', params.id)
+      .eq('child_id', id)
       .order('recorded_date', { ascending: false }),
 
     server
       .from('size_predictions')
       .select('predicted_top, predicted_bottom, predicted_shoe, confidence_score, basis, created_at')
-      .eq('child_id', params.id)
+      .eq('child_id', id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -74,16 +75,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   const prediction = computePrediction(ageWeeks, curves, history)
 
-  // Persist the new prediction (fire-and-forget on error — never block the response)
-  server.from('size_predictions').insert({
-    child_id:         params.id,
+  // Persist the new prediction (fire-and-forget — never block the response)
+  void Promise.resolve(server.from('size_predictions').insert({
+    child_id:         id,
     prediction_date:  new Date().toISOString().split('T')[0],
     predicted_top:    prediction.predicted_top,
     predicted_bottom: prediction.predicted_bottom,
     predicted_shoe:   prediction.predicted_shoe,
     confidence_score: prediction.confidence_score,
     basis:            prediction.basis,
-  }).then(() => {}).catch(() => {})
+  })).catch(() => {})
 
   return NextResponse.json({ ...prediction, created_at: new Date().toISOString(), fresh: true })
 }

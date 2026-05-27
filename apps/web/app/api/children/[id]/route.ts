@@ -25,12 +25,13 @@ async function ownsChild(server: ReturnType<typeof createServerSupabaseClient>, 
   return !!data
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const server = createServerSupabaseClient()
-  if (!(await ownsChild(server, user.id, params.id))) {
+  if (!(await ownsChild(server, user.id, id))) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
@@ -38,20 +39,20 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     server
       .from('child_profiles')
       .select('id, nickname, gender, dob, grade, school_id, sports, interests, popia_consent, created_at')
-      .eq('id', params.id)
+      .eq('id', id)
       .single(),
 
     server
       .from('child_sizes')
       .select('id, recorded_date, top_size, bottom_size, shoe_size, source, created_at')
-      .eq('child_id', params.id)
+      .eq('child_id', id)
       .order('recorded_date', { ascending: false })
       .limit(10),
 
     server
       .from('size_predictions')
       .select('predicted_top, predicted_bottom, predicted_shoe, confidence_score, basis, created_at')
-      .eq('child_id', params.id)
+      .eq('child_id', id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -64,12 +65,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   })
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const server = createServerSupabaseClient()
-  if (!(await ownsChild(server, user.id, params.id))) {
+  if (!(await ownsChild(server, user.id, id))) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
@@ -85,7 +87,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const { data, error } = await server
     .from('child_profiles')
     .update(updates)
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single()
 
@@ -93,19 +95,20 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json(data)
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const server = createServerSupabaseClient()
-  if (!(await ownsChild(server, user.id, params.id))) {
+  if (!(await ownsChild(server, user.id, id))) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
   await server
     .from('child_profiles')
     .update({ deleted_at: new Date().toISOString() })
-    .eq('id', params.id)
+    .eq('id', id)
 
   return NextResponse.json({ success: true })
 }

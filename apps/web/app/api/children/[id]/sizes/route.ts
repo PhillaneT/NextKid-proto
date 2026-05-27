@@ -24,30 +24,32 @@ async function ownsChild(server: ReturnType<typeof createServerSupabaseClient>, 
   return !!data
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const server = createServerSupabaseClient()
-  if (!(await ownsChild(server, user.id, params.id))) {
+  if (!(await ownsChild(server, user.id, id))) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
   const { data } = await server
     .from('child_sizes')
     .select('id, recorded_date, top_size, bottom_size, shoe_size, source, created_at')
-    .eq('child_id', params.id)
+    .eq('child_id', id)
     .order('recorded_date', { ascending: false })
 
   return NextResponse.json(data ?? [])
 }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const server = createServerSupabaseClient()
-  if (!(await ownsChild(server, user.id, params.id))) {
+  if (!(await ownsChild(server, user.id, id))) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { data, error } = await server
     .from('child_sizes')
     .insert({
-      child_id:      params.id,
+      child_id:      id,
       top_size,
       bottom_size,
       shoe_size,

@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 5000 -H 0.0.0.0",
-    "build": "next build",
-    "start": "next start -p 5000 -H 0.0.0.0",
+    "dev": "node ./node_modules/next/dist/bin/next dev -p 5000 -H 0.0.0.0",
+    "build": "node ./node_modules/next/dist/bin/next build",
+    "start": "node ./node_modules/next/dist/bin/next start -p 5000 -H 0.0.0.0",
     "lint": "eslint",
     "typecheck": "tsc --noEmit"
   },

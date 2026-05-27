@@ -1,5 +1,4 @@
 {
-  "buildCommand": "cd ../.. && pnpm turbo run build --filter=@nextkid/web --no-cache",
   "crons": [
     {
       "path": "/api/cron/reminders",

@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCart } from '@/lib/cart';
-import { ShoppingCart, ScanLine } from 'lucide-react';
+import { ShoppingCart, ScanLine, Menu, X } from 'lucide-react';
 
 const AUTH_HIDDEN    = ['/', '/onboarding'];
 const NAV_HIDDEN_PFX = ['/klerebank'];  // Hub Mode has its own header
@@ -15,6 +15,7 @@ export default function Navbar() {
   const [search, setSearch] = useState('');
   const [isLoggedIn,   setIsLoggedIn]   = useState(false);
   const [isHubAdmin,   setIsHubAdmin]   = useState(false);
+  const [menuOpen,     setMenuOpen]     = useState(false);
 
   useEffect(() => {
     async function check(userId: string | undefined) {
@@ -47,17 +48,38 @@ export default function Navbar() {
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
   const { count } = useCart();
 
+  const nav = (close?: () => void) => (
+    <>
+      <NavTab label="Browse" active={isActive('/browse')} onClick={() => { router.push('/browse'); close?.(); }} />
+      {isLoggedIn && (
+        <NavTab label="Sell" active={isActive('/sell')} onClick={() => { router.push('/sell/new'); close?.(); }} />
+      )}
+      {isLoggedIn && (
+        <NavTab label="Profile" active={isActive('/profile')} onClick={() => { router.push('/profile'); close?.(); }} />
+      )}
+      {isHubAdmin && !pathname.startsWith('/klerebank') && (
+        <button
+          onClick={() => { router.push('/klerebank'); close?.(); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-xs font-bold transition"
+        >
+          <ScanLine size={13} strokeWidth={2.5} />
+          Hub Mode
+        </button>
+      )}
+    </>
+  );
+
   return (
     <header className="sticky top-0 z-50 bg-[#6B6B6B]">
-      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-6">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 h-16 flex items-center gap-4">
 
         {/* Logo */}
         <a href="/dashboard" className="shrink-0">
-          <img src="/logo.png" alt="NextKid" height={88} style={{ height: '88px', width: 'auto' }} />
+          <img src="/logo.png" alt="NextKid" style={{ height: '72px', width: 'auto' }} />
         </a>
 
-        {/* Pill search bar */}
-        <form onSubmit={handleSearch} className="flex-1 max-w-xl">
+        {/* Pill search bar — hidden on mobile */}
+        <form onSubmit={handleSearch} className="hidden md:block flex-1 max-w-xl">
           <div className="relative">
             <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50 w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
@@ -71,27 +93,13 @@ export default function Navbar() {
           </div>
         </form>
 
-        {/* Nav tabs */}
-        <nav className="flex items-center gap-1">
-          <NavTab label="Browse" active={isActive('/browse')} onClick={() => router.push('/browse')} />
-          {isLoggedIn && (
-            <NavTab label="Sell" active={isActive('/sell')} onClick={() => router.push('/sell/new')} />
-          )}
-          {isLoggedIn && (
-            <NavTab label="Profile" active={isActive('/profile')} onClick={() => router.push('/profile')} />
-          )}
+        {/* Desktop nav */}
+        <nav className="hidden md:flex items-center gap-1">
+          {nav()}
         </nav>
 
-        {/* Hub Mode button */}
-        {isHubAdmin && !pathname.startsWith('/klerebank') && (
-          <button
-            onClick={() => router.push('/klerebank')}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-xs font-bold transition shrink-0"
-          >
-            <ScanLine size={13} strokeWidth={2.5} />
-            Hub Mode
-          </button>
-        )}
+        {/* Spacer on mobile */}
+        <div className="flex-1 md:hidden" />
 
         {/* Cart icon */}
         {isLoggedIn && (
@@ -108,23 +116,74 @@ export default function Navbar() {
           </button>
         )}
 
-        {/* Auth button */}
-        {!isLoggedIn ? (
-          <button
-            onClick={() => router.push('/')}
-            className="shrink-0 px-5 py-2 text-sm font-medium rounded-full bg-[#BE1E2D] text-white hover:bg-[#9B1824] transition"
-          >
-            Sign in
-          </button>
-        ) : (
-          <button
-            onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}
-            className="shrink-0 px-5 py-2 text-sm font-medium rounded-full border border-white/30 text-white hover:bg-white/10 transition"
-          >
-            Sign out
-          </button>
-        )}
+        {/* Desktop auth button */}
+        <div className="hidden md:block">
+          {!isLoggedIn ? (
+            <button
+              onClick={() => router.push('/')}
+              className="shrink-0 px-5 py-2 text-sm font-medium rounded-full bg-[#BE1E2D] text-white hover:bg-[#9B1824] transition"
+            >
+              Sign in
+            </button>
+          ) : (
+            <button
+              onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}
+              className="shrink-0 px-5 py-2 text-sm font-medium rounded-full border border-white/30 text-white hover:bg-white/10 transition"
+            >
+              Sign out
+            </button>
+          )}
+        </div>
+
+        {/* Mobile hamburger */}
+        <button
+          onClick={() => setMenuOpen(o => !o)}
+          className="md:hidden shrink-0 p-2 text-white"
+        >
+          {menuOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
       </div>
+
+      {/* Mobile search bar */}
+      <div className="md:hidden px-4 pb-3">
+        <form onSubmit={handleSearch}>
+          <div className="relative">
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50 w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+            </svg>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search for school items..."
+              className="w-full bg-white/15 rounded-full pl-10 pr-4 py-2.5 text-sm text-white placeholder-white/50 outline-none focus:ring-2 focus:ring-white/30 transition"
+            />
+          </div>
+        </form>
+      </div>
+
+      {/* Mobile menu drawer */}
+      {menuOpen && (
+        <div className="md:hidden bg-[#5a5a5a] px-4 pb-4 flex flex-col gap-1">
+          {nav(() => setMenuOpen(false))}
+          <div className="mt-2 border-t border-white/20 pt-3">
+            {!isLoggedIn ? (
+              <button
+                onClick={() => { router.push('/'); setMenuOpen(false); }}
+                className="w-full py-2.5 text-sm font-medium rounded-full bg-[#BE1E2D] text-white hover:bg-[#9B1824] transition"
+              >
+                Sign in
+              </button>
+            ) : (
+              <button
+                onClick={async () => { await supabase.auth.signOut(); router.push('/'); setMenuOpen(false); }}
+                className="w-full py-2.5 text-sm font-medium rounded-full border border-white/30 text-white hover:bg-white/10 transition"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }

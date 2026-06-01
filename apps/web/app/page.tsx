@@ -56,7 +56,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex">
 
       {/* Left panel — brand */}
-      <div className="hidden md:flex flex-col justify-between w-1/2 bg-[#3A3A3A] p-12">
+      <div className="hidden md:flex flex-col justify-between w-1/2 bg-[#6B6B6B] p-12">
 
         {/* Logo */}
         <div className="flex flex-col items-start gap-4">

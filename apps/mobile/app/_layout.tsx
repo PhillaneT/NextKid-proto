@@ -41,10 +41,46 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="auth/reset-password" />
-        <Stack.Screen name="order/[id]" />
-        <Stack.Screen name="checkout/[listingId]" />
-        <Stack.Screen name="cart" />
+        <Stack.Screen
+          name="auth/reset-password"
+          options={{
+            headerShown: true,
+            headerTitle: 'Reset Password',
+            headerBackTitle: 'Back',
+            headerStyle: { backgroundColor: '#3A3A3A' },
+            headerTintColor: '#ffffff',
+          }}
+        />
+        <Stack.Screen
+          name="order/[id]"
+          options={{
+            headerShown: true,
+            headerTitle: 'Order Detail',
+            headerBackTitle: 'Back',
+            headerStyle: { backgroundColor: '#3A3A3A' },
+            headerTintColor: '#ffffff',
+          }}
+        />
+        <Stack.Screen
+          name="checkout/[listingId]"
+          options={{
+            headerShown: true,
+            headerTitle: 'Checkout',
+            headerBackTitle: 'Back',
+            headerStyle: { backgroundColor: '#3A3A3A' },
+            headerTintColor: '#ffffff',
+          }}
+        />
+        <Stack.Screen
+          name="cart"
+          options={{
+            headerShown: true,
+            headerTitle: 'Cart',
+            headerBackTitle: 'Back',
+            headerStyle: { backgroundColor: '#3A3A3A' },
+            headerTintColor: '#ffffff',
+          }}
+        />
         <Stack.Screen
           name="klerebank"
           options={{ headerShown: false }}
@@ -65,7 +101,7 @@ export default function RootLayout() {
             headerShown: true,
             headerTitle: '',
             headerBackTitle: 'Back',
-            headerStyle: { backgroundColor: '#ffffff' },
+            headerStyle: { backgroundColor: '#3A3A3A' },
             headerTintColor: '#BE1E2D',
           }}
         />

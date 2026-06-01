@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useCart } from '@/lib/cart';
 import {
   Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
-  Lock, BadgeCheck, MapPin, Clock, Sparkles, Baby, Check, ShoppingCart,
+  Lock, BadgeCheck, MapPin, Clock, Sparkles, Baby, Check, ShoppingCart, GraduationCap,
 } from 'lucide-react';
 import { ALL_CATEGORIES } from '@nextkid/shared';
 import type { ListingCategory } from '@nextkid/shared';
@@ -16,8 +16,9 @@ const CATEGORY_ICON: Record<string, React.ReactNode> = {
   'School Sports Kit': <Trophy size={26} strokeWidth={2} />,
   'Shoes':             <Footprints size={26} strokeWidth={2} />,
   'Sports Equipment':  <Dumbbell size={26} strokeWidth={2} />,
-  'Books & Stationery':<BookOpen size={26} strokeWidth={2} />,
-  'Bags & Accessories':<ShoppingBag size={26} strokeWidth={2} />,
+  'Books & Stationery':   <BookOpen size={26} strokeWidth={2} />,
+  'University Textbooks': <GraduationCap size={26} strokeWidth={2} />,
+  'Bags & Accessories':   <ShoppingBag size={26} strokeWidth={2} />,
   'Other':             <Package size={26} strokeWidth={2} />,
 };
 
@@ -215,6 +216,23 @@ export default function DashboardPage() {
 
       <div className="max-w-7xl mx-auto px-6 py-12 space-y-12">
 
+        {/* Category grid */}
+        <section>
+          <h2 className="text-xl font-bold text-[#111] mb-4">Shop by category</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+            {(ALL_CATEGORIES as readonly ListingCategory[]).map(cat => (
+              <button
+                key={cat}
+                onClick={() => router.push(`/browse?category=${encodeURIComponent(cat)}`)}
+                className="flex flex-col items-center gap-2 p-4 bg-[#f4f4f4] rounded-2xl hover:bg-[#fde8ea] hover:text-[#BE1E2D] transition group text-center shrink-0 min-w-[90px]"
+              >
+                <span className="text-[#BE1E2D]">{CATEGORY_ICON[cat] ?? <Package size={26} strokeWidth={2} />}</span>
+                <span className="text-xs font-medium text-[#111] group-hover:text-[#BE1E2D] leading-tight">{cat}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
         {/* ── Personalised feed ── */}
         {feedLoading ? (
           <section>
@@ -297,23 +315,6 @@ export default function DashboardPage() {
             </button>
           </div>
         )}
-
-        {/* Category grid */}
-        <section>
-          <h2 className="text-xl font-bold text-[#111] mb-4">Shop by category</h2>
-          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-            {(ALL_CATEGORIES as readonly ListingCategory[]).map(cat => (
-              <button
-                key={cat}
-                onClick={() => router.push(`/browse?category=${encodeURIComponent(cat)}`)}
-                className="flex flex-col items-center gap-2 p-4 bg-[#f4f4f4] rounded-2xl hover:bg-[#fde8ea] hover:text-[#BE1E2D] transition group text-center shrink-0 min-w-[90px]"
-              >
-                <span className="text-[#BE1E2D]">{CATEGORY_ICON[cat] ?? <Package size={26} strokeWidth={2} />}</span>
-                <span className="text-xs font-medium text-[#111] group-hover:text-[#BE1E2D] leading-tight">{cat}</span>
-              </button>
-            ))}
-          </div>
-        </section>
 
         {/* Recently listed (always shown) */}
         <section>

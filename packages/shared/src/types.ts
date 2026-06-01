@@ -101,6 +101,7 @@ export type ListingCategory =
   | 'Shoes'
   | 'Sports Equipment'
   | 'Books & Stationery'
+  | 'University Textbooks'
   | 'Bags & Accessories'
   | 'Other';
 

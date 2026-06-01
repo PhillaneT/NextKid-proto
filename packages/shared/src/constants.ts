@@ -21,7 +21,7 @@ export type ListingCondition = typeof LISTING_CONDITIONS[number];
 // Categories where the item belongs to a specific school (uniform, team kit)
 // vs generic items sold nationwide (shoes, bags, books, equipment)
 export const SCHOOL_SPECIFIC_CATEGORIES = ['School Uniforms', 'School Sports Kit'] as const;
-export const NATIONWIDE_CATEGORIES = ['Shoes', 'Sports Equipment', 'Books & Stationery', 'Bags & Accessories', 'Other'] as const;
+export const NATIONWIDE_CATEGORIES = ['Shoes', 'Sports Equipment', 'Books & Stationery', 'University Textbooks', 'Bags & Accessories', 'Other'] as const;
 export const ALL_CATEGORIES = [...SCHOOL_SPECIFIC_CATEGORIES, ...NATIONWIDE_CATEGORIES] as const;
 // ListingCategory is exported from types.ts — do not re-export here
 
@@ -31,6 +31,7 @@ export const CATEGORY_EMOJI: Record<ListingCategory, string> = {
   'Shoes': '👟',
   'Sports Equipment': '⚽',
   'Books & Stationery': '📚',
+  'University Textbooks': '🎓',
   'Bags & Accessories': '🎒',
   'Other': '📦',
 };
@@ -41,6 +42,7 @@ export const SUBCATEGORIES: Record<ListingCategory, string[]> = {
   'Shoes': ['Black School Shoes', 'PT / Takkies', 'Rugby Boots', 'Soccer Boots', 'Cricket Shoes', 'Hockey Shoes', 'Running Shoes', 'Other'],
   'Sports Equipment': ['Rackets & Bats', 'Balls', 'Protective Gear', 'Swimming Gear', 'Bags & Holdalls', 'Other'],
   'Books & Stationery': ['Textbooks', 'Study Guides', 'Stationery Sets', 'Calculators & Tech', 'Other'],
+  'University Textbooks': ['First Year', 'Second Year', 'Third Year', 'Honours', 'Engineering', 'Law', 'Medicine', 'Commerce', 'Humanities', 'Other'],
   'Bags & Accessories': ['Backpacks', 'Sports Bags', 'Lunch Boxes', 'Water Bottles', 'Other'],
   'Other': ['Other'],
 };

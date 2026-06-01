@@ -4,10 +4,10 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCart } from '@/lib/cart';
-import { ShoppingCart, ScanLine, Menu, X } from 'lucide-react';
+import { ShoppingCart, ScanLine, Menu, X, ArrowLeft } from 'lucide-react';
 
 const AUTH_HIDDEN    = ['/', '/onboarding'];
-const NAV_HIDDEN_PFX = ['/klerebank'];  // Hub Mode has its own header
+const NAV_HIDDEN_PFX = ['/klerebank'];
 
 export default function Navbar() {
   const router = useRouter();
@@ -47,6 +47,7 @@ export default function Navbar() {
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
   const { count } = useCart();
+  const showBack = true;
 
   const nav = (close?: () => void) => (
     <>
@@ -72,6 +73,17 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-50 bg-[#6B6B6B]">
       <div className="max-w-7xl mx-auto px-4 md:px-6 h-16 flex items-center gap-4">
+
+        {/* Back button */}
+        {showBack && (
+          <button
+            onClick={() => router.back()}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white rounded-full transition text-sm font-medium"
+          >
+            <ArrowLeft size={16} strokeWidth={2.5} />
+            Back
+          </button>
+        )}
 
         {/* Logo */}
         <a href="/dashboard" className="shrink-0">

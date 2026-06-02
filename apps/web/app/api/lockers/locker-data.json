@@ -1,4 +1,4 @@
-[
+﻿[
     {
         "code": "CG70",
         "provider": "TCG",
@@ -96627,35 +96627,5 @@
             }
         ],
         "status": "online"
-    },
-    {
-        "code": "CG796",
-        "provider": "TCG",
-        "name": "Supa Quick Polokwane",
-        "latitude": "-23.8912977",
-        "longitude": "29.4525459",
-        "openinghours": [
-            {
-                "day": "Monday",
-                "open_time": "08:00:00",
-                "close_time": "17:00:00",
-                "isStoreOpen": "Open"
-            },
-            {
-                "day": "Tuesday",
-                "open_time": "08:00:00",
-                "close_time": "17:00:00",
-                "isStoreOpen": "Open"
-            },
-            {
-                "day": "Wednesday",
-                "open_time": "08:00:00",
-                "close_time": "17:00:00",
-                "isStoreOpen": "Open"
-            },
-            {
-                "day": "Thursday",
-                "open_time": "08:00:00",
-                "close_time": "17:00:00",
-                "isStoreOpen": "Open"
-            }
+    }
+]

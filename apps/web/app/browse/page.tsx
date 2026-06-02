@@ -75,6 +75,11 @@ export default function BrowsePage() {
     });
   }, []);
 
+  // Default to My School tab once schools are loaded
+  useEffect(() => {
+    if (userSchools.length > 0) setTab('my_school');
+  }, [userSchools]);
+
   // Apply category filter from URL param
   useEffect(() => {
     const cat = searchParams.get('category');

@@ -416,6 +416,7 @@ export default function ChildrenPage() {
     setChildren(prev => [...prev, child])
     setShowAdd(false)
     setSelected(child)
+    fetch('/api/feed', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
   }
 
   const handleUpdate = (updated: Child) => {

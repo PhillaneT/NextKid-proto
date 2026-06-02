@@ -30,15 +30,17 @@ export default function WishlistPage() {
   const [removing, setRemoving] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) { router.push('/'); return; }
-      loadWishlist();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { router.push('/'); return; }
+      loadWishlist(session.access_token);
     });
   }, []);
 
-  async function loadWishlist() {
+  async function loadWishlist(token: string) {
     setLoading(true);
-    const res = await fetch('/api/wishlist');
+    const res = await fetch('/api/wishlist', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (res.ok) {
       const json = await res.json();
       setItems(json.items ?? []);
@@ -48,7 +50,12 @@ export default function WishlistPage() {
 
   async function remove(listingId: string) {
     setRemoving(listingId);
-    await fetch(`/api/wishlist/${listingId}`, { method: 'DELETE' });
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch(`/api/wishlist/${listingId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
     setItems(prev => prev.filter(i => i.listing_id !== listingId));
     setRemoving(null);
   }

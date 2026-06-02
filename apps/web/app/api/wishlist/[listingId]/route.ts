@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 
-// DELETE /api/wishlist/[listingId] — remove from wishlist
+async function resolveUser(req: NextRequest) {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const anon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+  const { data } = await anon.auth.getUser(token)
+  return data.user ?? null
+}
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { listingId: string } },
 ) {
-  const server = createServerSupabaseClient()
-  const { data: { user } } = await server.auth.getUser()
+  const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
 
+  const server = createServerSupabaseClient()
   const { error } = await server
     .from('wishlists')
     .delete()

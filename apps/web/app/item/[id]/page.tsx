@@ -246,11 +246,16 @@ export default function ItemPage() {
       setIsOwner(owner);
       if (!owner) {
         // Check if already wishlisted
-        const res = await fetch('/api/wishlist');
-        if (res.ok) {
-          const json = await res.json();
-          const ids = (json.items ?? []).map((i: { listing_id: string }) => i.listing_id);
-          setWishlisted(ids.includes(data.id));
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const res = await fetch('/api/wishlist', {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            const ids = (json.items ?? []).map((i: { listing_id: string }) => i.listing_id);
+            setWishlisted(ids.includes(data.id));
+          }
         }
       }
     } else {
@@ -312,16 +317,19 @@ export default function ItemPage() {
     } else {
       // Notify anyone who wishlisted this item if the price dropped
       if (newPriceCents < oldPriceCents) {
-        fetch('/api/wishlist/price-drop', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            listingId:     item!.id,
-            itemTitle:     editForm.title,
-            oldPriceCents,
-            newPriceCents,
-          }),
-        }).catch(() => {});
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (!session) return;
+          fetch('/api/wishlist/price-drop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({
+              listingId:     item!.id,
+              itemTitle:     editForm.title,
+              oldPriceCents,
+              newPriceCents,
+            }),
+          }).catch(() => {});
+        });
       }
       await fetchItem();
       setIsEditing(false);
@@ -406,13 +414,19 @@ export default function ItemPage() {
   async function toggleWishlist() {
     if (!currentUserId || !item) return;
     setWishlistLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setWishlistLoading(false); return; }
+    const token = session.access_token;
     if (wishlisted) {
-      await fetch(`/api/wishlist/${item.id}`, { method: 'DELETE' });
+      await fetch(`/api/wishlist/${item.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setWishlisted(false);
     } else {
       await fetch('/api/wishlist', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ listingId: item.id }),
       });
       setWishlisted(true);

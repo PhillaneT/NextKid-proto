@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 
-// GET  /api/wishlist         — returns the current user's wishlisted listings
-// POST /api/wishlist         — add { listingId } to wishlist
+async function resolveUser(req: NextRequest) {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const anon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+  const { data } = await anon.auth.getUser(token)
+  return data.user ?? null
+}
 
-export async function GET() {
-  const server = createServerSupabaseClient()
-  const { data: { user } } = await server.auth.getUser()
+export async function GET(req: NextRequest) {
+  const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
 
+  const server = createServerSupabaseClient()
   const { data, error } = await server
     .from('wishlists')
     .select(`
@@ -27,14 +33,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const server = createServerSupabaseClient()
-  const { data: { user } } = await server.auth.getUser()
+  const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
 
   const { listingId } = await req.json()
   if (!listingId) return NextResponse.json({ error: 'listingId required' }, { status: 400 })
 
-  // Fetch current price to store for price-drop detection later
+  const server = createServerSupabaseClient()
   const { data: listing } = await server
     .from('listings')
     .select('price_cents')

@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { sendPriceDropNotifications } from '@/lib/notifications'
 
-// POST /api/wishlist/price-drop
-// Called server-side when a seller lowers a listing price.
-// Sends push + email notifications to everyone who wishlisted the item.
+async function resolveUser(req: NextRequest) {
+  const token = req.headers.get('Authorization')?.replace('Bearer ', '') ?? ''
+  if (!token) return null
+  const anon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+  const { data } = await anon.auth.getUser(token)
+  return data.user ?? null
+}
 
 export async function POST(req: NextRequest) {
-  const server = createServerSupabaseClient()
-  const { data: { user } } = await server.auth.getUser()
+  const user = await resolveUser(req)
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
 
   const { listingId, itemTitle, oldPriceCents, newPriceCents } = await req.json()
@@ -16,7 +20,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'missing fields' }, { status: 400 })
   }
 
-  // Verify the caller owns the listing
+  const server = createServerSupabaseClient()
   const { data: listing } = await server
     .from('listings')
     .select('seller_id')

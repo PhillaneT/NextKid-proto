@@ -67,11 +67,13 @@ export default function BrowsePage() {
 
   // Load the user's saved schools for the "My School" tab, and their wishlist IDs
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return;
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return;
+      const token = session.access_token;
+      const headers = { Authorization: `Bearer ${token}` };
       const [{ data: profile }, wishlistRes] = await Promise.all([
-        supabase.from('profiles').select('school_ids').eq('id', user.id).single(),
-        fetch('/api/wishlist'),
+        supabase.from('profiles').select('school_ids').eq('id', session.user.id).single(),
+        fetch('/api/wishlist', { headers }),
       ]);
       if (profile?.school_ids?.length) {
         const { data: schools } = await supabase.from('schools').select('*').in('id', profile.school_ids);
@@ -126,16 +128,20 @@ export default function BrowsePage() {
 
   async function toggleWishlist(e: React.MouseEvent, listingId: string) {
     e.stopPropagation();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const token = session.access_token;
     setWishlistLoading(listingId);
     if (wishlistIds.has(listingId)) {
-      await fetch(`/api/wishlist/${listingId}`, { method: 'DELETE' });
+      await fetch(`/api/wishlist/${listingId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setWishlistIds(prev => { const n = new Set(prev); n.delete(listingId); return n; });
     } else {
       await fetch('/api/wishlist', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ listingId }),
       });
       setWishlistIds(prev => new Set(prev).add(listingId));

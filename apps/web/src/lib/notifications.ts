@@ -411,6 +411,69 @@ export async function nudgeUncollectedBuyers() {
   return orders.length
 }
 
+// ── Price-drop notification — fired when a seller lowers their listing price ──
+
+export async function sendPriceDropNotifications(
+  listingId:     string,
+  itemTitle:     string,
+  oldPriceCents: number,
+  newPriceCents: number,
+) {
+  if (newPriceCents >= oldPriceCents) return   // only notify on actual drops
+
+  const server = createServerSupabaseClient()
+
+  // Find everyone who wishlisted this item and saved the higher price
+  const { data: wishlisters } = await server
+    .from('wishlists')
+    .select('user_id, price_at_save')
+    .eq('listing_id', listingId)
+    .gt('price_at_save', newPriceCents)   // only notify if they saw a higher price
+
+  if (!wishlisters?.length) return
+
+  const userIds = wishlisters.map(w => w.user_id)
+  const { data: profiles } = await server
+    .from('profiles')
+    .select('id, full_name, email, expo_push_token')
+    .in('id', userIds) as { data: Profile[] | null }
+
+  const oldStr = `R${(oldPriceCents / 100).toLocaleString()}`
+  const newStr = `R${(newPriceCents / 100).toLocaleString()}`
+
+  for (const profile of profiles ?? []) {
+    const pushMsg = `Price drop! "${itemTitle}" is now ${newStr} (was ${oldStr}) 🏷️`
+
+    if (profile.expo_push_token) {
+      await sendPush(profile.expo_push_token, 'NextKid — Price Drop!', pushMsg)
+    }
+
+    if (profile.email) {
+      await sendEmail(
+        profile.email,
+        `Price drop on a wishlisted item 🏷️`,
+        `Good news — an item you wishlisted just dropped in price!<br><br>
+        <strong>${itemTitle}</strong><br>
+        <span style="text-decoration:line-through;color:#979797">${oldStr}</span>&nbsp;&nbsp;
+        <strong style="color:#BE1E2D;font-size:18px">${newStr}</strong><br><br>
+        Don't miss out — grab it while the price is down.`,
+        profile.full_name ?? 'there',
+      )
+    }
+
+    await save(server, profile.id, null, 'price_drop', pushMsg, listingId)
+
+    // Update their saved price so they don't get duplicate notifications
+    await server
+      .from('wishlists')
+      .update({ price_at_save: newPriceCents })
+      .eq('user_id', profile.id)
+      .eq('listing_id', listingId)
+  }
+
+  console.log(`[PriceDrop] Notified ${(profiles ?? []).length} wishlisters for listing ${listingId}`)
+}
+
 // ── Lifecycle reminder notification — fired by /api/cron/reminders ────────────
 
 export async function sendReminderNotification(userId: string, message: string) {

@@ -75,8 +75,8 @@ export default function ItemPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [liked, setLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
+  const [wishlisted, setWishlisted] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
   const [sellerProvince, setSellerProvince] = useState<string | null>(null);
   const [sellerSoldCount, setSellerSoldCount] = useState(0);
   const [viewSchoolName, setViewSchoolName] = useState<string | null>(null);
@@ -244,6 +244,15 @@ export default function ItemPage() {
       setCurrentUserId(user.id);
       const owner = user.id === data.seller_id;
       setIsOwner(owner);
+      if (!owner) {
+        // Check if already wishlisted
+        const res = await fetch('/api/wishlist');
+        if (res.ok) {
+          const json = await res.json();
+          const ids = (json.items ?? []).map((i: { listing_id: string }) => i.listing_id);
+          setWishlisted(ids.includes(data.id));
+        }
+      }
     } else {
       fetchHighestBid(data.id);
     }
@@ -276,9 +285,12 @@ export default function ItemPage() {
 
   async function handleSave() {
     setSaving(true);
+    const oldPriceCents = item!.price_cents;
+    const newPriceCents = parseInt(editForm.price) * 100 || 0;
+
     const { error } = await supabase.from('listings').update({
       title: editForm.title, category: editForm.category, subcategory: editForm.subcategory || null,
-      price_cents: parseInt(editForm.price) * 100 || 0,
+      price_cents: newPriceCents,
       description: editForm.description || null,
       size: editForm.size || null, gender: editForm.gender || null,
       grade: editForm.grade ? parseInt(editForm.grade) : null,
@@ -294,8 +306,26 @@ export default function ItemPage() {
       pudo_locker_id:    editPudoLockerId   || null,
       pudo_locker_name:  editPudoLockerName || null,
     }).eq('id', item!.id);
-    if (error) alert('Error saving: ' + error.message);
-    else { await fetchItem(); setIsEditing(false); }
+
+    if (error) {
+      alert('Error saving: ' + error.message);
+    } else {
+      // Notify anyone who wishlisted this item if the price dropped
+      if (newPriceCents < oldPriceCents) {
+        fetch('/api/wishlist/price-drop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            listingId:     item!.id,
+            itemTitle:     editForm.title,
+            oldPriceCents,
+            newPriceCents,
+          }),
+        }).catch(() => {});
+      }
+      await fetchItem();
+      setIsEditing(false);
+    }
     setSaving(false);
   }
 
@@ -373,17 +403,21 @@ export default function ItemPage() {
     });
   }
 
-  async function toggleLike() {
+  async function toggleWishlist() {
     if (!currentUserId || !item) return;
-    if (liked) {
-      await supabase.from('likes').delete().eq('item_id', item.id).eq('user_id', currentUserId);
-      setLiked(false);
-      setLikeCount(c => Math.max(0, c - 1));
+    setWishlistLoading(true);
+    if (wishlisted) {
+      await fetch(`/api/wishlist/${item.id}`, { method: 'DELETE' });
+      setWishlisted(false);
     } else {
-      await supabase.from('likes').insert({ item_id: item.id, user_id: currentUserId });
-      setLiked(true);
-      setLikeCount(c => c + 1);
+      await fetch('/api/wishlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listingId: item.id }),
+      });
+      setWishlisted(true);
     }
+    setWishlistLoading(false);
   }
 
   const auctionEnded = false;
@@ -805,6 +839,20 @@ export default function ItemPage() {
                         <p className="text-[#111] font-medium mb-2">Sign in to buy or make offers</p>
                         <button onClick={() => router.push('/')} className="px-6 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-sm font-medium transition">Sign In</button>
                       </div>
+                    )}
+                    {isLoggedIn && (
+                      <button
+                        onClick={toggleWishlist}
+                        disabled={wishlistLoading}
+                        className={`flex items-center justify-center gap-2 w-full py-3 rounded-full border-2 text-sm font-medium transition ${
+                          wishlisted
+                            ? 'border-[#BE1E2D] bg-[#fde8ea] text-[#BE1E2D]'
+                            : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
+                        }`}
+                      >
+                        <Heart size={16} strokeWidth={2} fill={wishlisted ? '#BE1E2D' : 'none'} />
+                        {wishlisted ? 'Saved to Wishlist' : 'Save to Wishlist'}
+                      </button>
                     )}
                     {isLoggedIn && item.is_multi_item && listingItems.length > 0 && (
                       <div className="space-y-3 mb-4">

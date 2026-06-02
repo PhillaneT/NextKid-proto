@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Shirt, Trophy, Footprints, Dumbbell, BookOpen, ShoppingBag, Package,
-  School as SchoolIcon, Search, ShoppingCart, Check,
+  School as SchoolIcon, Search, ShoppingCart, Check, Heart,
 } from 'lucide-react';
 import { useCart } from '@/lib/cart';
 import { ALL_CATEGORIES, PLATFORM_DEFAULTS } from '@nextkid/shared';
@@ -52,6 +52,8 @@ export default function BrowsePage() {
   const [tab, setTab] = useState<BrowseTab>('all');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
+  const [wishlistIds, setWishlistIds] = useState<Set<string>>(new Set());
+  const [wishlistLoading, setWishlistLoading] = useState<string | null>(null);
   const [category, setCategory] = useState<ListingCategory | 'All'>('All');
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
   const [debouncedSearch, setDebouncedSearch] = useState(searchParams.get('q') ?? '');
@@ -63,14 +65,21 @@ export default function BrowsePage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Load the user's saved schools for the "My School" tab
+  // Load the user's saved schools for the "My School" tab, and their wishlist IDs
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
-      const { data: profile } = await supabase.from('profiles').select('school_ids').eq('id', user.id).single();
+      const [{ data: profile }, wishlistRes] = await Promise.all([
+        supabase.from('profiles').select('school_ids').eq('id', user.id).single(),
+        fetch('/api/wishlist'),
+      ]);
       if (profile?.school_ids?.length) {
         const { data: schools } = await supabase.from('schools').select('*').in('id', profile.school_ids);
         setUserSchools((schools as School[]) ?? []);
+      }
+      if (wishlistRes.ok) {
+        const json = await wishlistRes.json();
+        setWishlistIds(new Set((json.items ?? []).map((i: { listing_id: string }) => i.listing_id)));
       }
     });
   }, []);
@@ -114,6 +123,25 @@ export default function BrowsePage() {
   }, [category, debouncedSearch, tab, userSchools]);
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
+
+  async function toggleWishlist(e: React.MouseEvent, listingId: string) {
+    e.stopPropagation();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setWishlistLoading(listingId);
+    if (wishlistIds.has(listingId)) {
+      await fetch(`/api/wishlist/${listingId}`, { method: 'DELETE' });
+      setWishlistIds(prev => { const n = new Set(prev); n.delete(listingId); return n; });
+    } else {
+      await fetch('/api/wishlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listingId }),
+      });
+      setWishlistIds(prev => new Set(prev).add(listingId));
+    }
+    setWishlistLoading(null);
+  }
 
   const hasSchools = userSchools.length > 0;
 
@@ -217,31 +245,47 @@ export default function BrowsePage() {
                   <h3 className="text-sm font-medium text-[#111] line-clamp-2 leading-snug mb-2">{item.title}</h3>
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-base font-bold text-[#BE1E2D]">R{(item.price_cents / 100).toLocaleString()}</p>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation()
-                        add({
-                          listingId: item.id,
-                          title: item.title,
-                          price_cents: item.price_cents,
-                          image: item.images?.[0] ?? null,
-                          sellerId: item.seller_id,
-                          category: item.category,
-                          size: item.size,
-                        })
-                      }}
-                      className={`shrink-0 p-1.5 rounded-full border transition ${
-                        has(item.id)
-                          ? 'bg-[#BE1E2D] border-[#BE1E2D] text-white'
-                          : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
-                      }`}
-                      title={has(item.id) ? 'In cart' : 'Add to cart'}
-                    >
-                      {has(item.id)
-                        ? <Check size={13} strokeWidth={2.5} />
-                        : <ShoppingCart size={13} strokeWidth={2} />
-                      }
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Wishlist heart */}
+                      <button
+                        onClick={e => toggleWishlist(e, item.id)}
+                        disabled={wishlistLoading === item.id}
+                        className={`p-1.5 rounded-full border transition ${
+                          wishlistIds.has(item.id)
+                            ? 'border-[#BE1E2D] text-[#BE1E2D]'
+                            : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
+                        }`}
+                        title={wishlistIds.has(item.id) ? 'Remove from wishlist' : 'Save to wishlist'}
+                      >
+                        <Heart size={13} strokeWidth={2} fill={wishlistIds.has(item.id) ? '#BE1E2D' : 'none'} />
+                      </button>
+                      {/* Cart */}
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          add({
+                            listingId: item.id,
+                            title: item.title,
+                            price_cents: item.price_cents,
+                            image: item.images?.[0] ?? null,
+                            sellerId: item.seller_id,
+                            category: item.category,
+                            size: item.size,
+                          });
+                        }}
+                        className={`p-1.5 rounded-full border transition ${
+                          has(item.id)
+                            ? 'bg-[#BE1E2D] border-[#BE1E2D] text-white'
+                            : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
+                        }`}
+                        title={has(item.id) ? 'In cart' : 'Add to cart'}
+                      >
+                        {has(item.id)
+                          ? <Check size={13} strokeWidth={2.5} />
+                          : <ShoppingCart size={13} strokeWidth={2} />
+                        }
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

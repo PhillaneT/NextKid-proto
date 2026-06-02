@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCart } from '@/lib/cart';
-import { ShoppingCart, ScanLine, Menu, X, ArrowLeft } from 'lucide-react';
+import { ShoppingCart, ScanLine, Menu, X, ArrowLeft, Heart } from 'lucide-react';
 
 const AUTH_HIDDEN    = ['/', '/onboarding'];
 const NAV_HIDDEN_PFX = ['/klerebank'];
@@ -54,6 +54,16 @@ export default function Navbar() {
       <NavTab label="Browse" active={isActive('/browse')} onClick={() => { router.push('/browse'); close?.(); }} />
       {isLoggedIn && (
         <NavTab label="Sell" active={isActive('/sell')} onClick={() => { router.push('/sell/new'); close?.(); }} />
+      )}
+      {isLoggedIn && (
+        <button
+          onClick={() => { router.push('/wishlist'); close?.(); }}
+          className={`px-4 py-2 text-sm font-medium relative transition flex items-center gap-1.5 ${isActive('/wishlist') ? 'text-white' : 'text-white/60 hover:text-white'}`}
+        >
+          <Heart size={14} strokeWidth={2} fill={isActive('/wishlist') ? 'white' : 'none'} />
+          Wishlist
+          {isActive('/wishlist') && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#BE1E2D] rounded-full" />}
+        </button>
       )}
       {isLoggedIn && (
         <NavTab label="Profile" active={isActive('/profile')} onClick={() => { router.push('/profile'); close?.(); }} />

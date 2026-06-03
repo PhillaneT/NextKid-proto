@@ -152,7 +152,7 @@ export default function HomeScreen() {
       .from('listings')
       .select('id, title, category, price_cents, images, seller_id, seller_school_id, condition, created_at, is_multi_item, available_count, schools(name)')
       .eq('status', 'ACTIVE')
-      .not('seller_school_id', 'in', `(${userSchoolIds.join(',')})`)
+      .or(`seller_school_id.not.in.(${userSchoolIds.join(',')}),seller_school_id.is.null`)
       .order('created_at', { ascending: false })
       .then(({ data }) => setOtherListings((data as unknown as Listing[]) ?? []));
   }, [tab, userSchoolIds]);

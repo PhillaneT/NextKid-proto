@@ -123,12 +123,13 @@ export default function BrowsePage() {
       const { data: schoolData } = await query.in('seller_school_id', schoolIds);
       setItems((schoolData as unknown as Item[]) ?? []);
 
-      // Fetch other listings (not from user's schools)
+      // Fetch other listings (not from user's schools, including those with no school set)
+      // Using .or() because NOT IN silently drops NULLs in PostgREST
       let otherQuery = supabase
         .from('listings')
         .select(baseSelect)
         .eq('status', 'ACTIVE')
-        .not('seller_school_id', 'in', `(${schoolIds.join(',')})`)
+        .or(`seller_school_id.not.in.(${schoolIds.join(',')}),seller_school_id.is.null`)
         .order('created_at', { ascending: false });
 
       if (category !== 'All') otherQuery = otherQuery.eq('category', category);

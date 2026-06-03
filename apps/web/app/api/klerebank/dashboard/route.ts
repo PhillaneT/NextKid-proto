@@ -21,30 +21,36 @@ export async function GET(req: NextRequest) {
 
   const server = createServerSupabaseClient()
 
-  // Verify Klerebank Admin role
+  // Verify admin role (klerebank_admin OR super_admin)
   const { data: adminRow } = await server
     .from('school_admins')
-    .select('school_id, schools(name, city_name)')
+    .select('school_id, role, schools(name, city_name)')
     .eq('user_id', userData.user.id)
     .eq('active', true)
     .single()
 
   if (!adminRow) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
-  const schoolId   = adminRow.school_id
-  const schoolName = (adminRow.schools as any)?.name    ?? 'Your school'
-  const cityName   = (adminRow.schools as any)?.city_name ?? ''
+  const isSuperAdmin = adminRow.role === 'super_admin'
+  const schoolId     = adminRow.school_id
+  const schoolName   = isSuperAdmin ? 'All Schools' : ((adminRow.schools as any)?.name ?? 'Your school')
+  const cityName     = isSuperAdmin ? '' : ((adminRow.schools as any)?.city_name ?? '')
 
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
 
-  // Fetch listing IDs for this school first (subqueries not supported in .in())
-  const { data: schoolListings } = await server
-    .from('listings')
-    .select('id')
-    .eq('seller_school_id', schoolId)
-
-  const listingIds = (schoolListings ?? []).map(l => l.id)
+  // Super admins see all listings; school admins see only their school's listings
+  let listingIds: string[] = []
+  if (isSuperAdmin) {
+    const { data: allListings } = await server.from('listings').select('id')
+    listingIds = (allListings ?? []).map(l => l.id)
+  } else {
+    const { data: schoolListings } = await server
+      .from('listings')
+      .select('id')
+      .eq('seller_school_id', schoolId)
+    listingIds = (schoolListings ?? []).map(l => l.id)
+  }
 
   // RULE: join only to get waybill + timing — never select buyer_id, seller_id, listing details
   // Incoming: seller must bring item in (AWAITING_DROPOFF)
@@ -88,26 +94,38 @@ export async function GET(req: NextRequest) {
   // Falls back to summing school_ledger directly if migration 023 hasn't run yet.
   const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
 
-  const { data: summary } = await server
-    .from('school_ledger_summary')
-    .select('grand_total_cents, direct_earnings_cents')
-    .eq('school_id', schoolId)
-    .eq('month', currentMonth)
-    .maybeSingle()
-
-  let earningsThisMonth    = summary?.grand_total_cents ?? 0
+  let earningsThisMonth    = 0
   let collectionsThisMonth = 0
 
-  if (!summary) {
-    // Fallback: query school_ledger by school_id (not admin_id)
+  if (isSuperAdmin) {
+    // Super admin sees totals across all schools
     const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
     const { data: ledger } = await server
       .from('school_ledger')
       .select('amount_cents, event_type')
-      .eq('school_id', schoolId)
       .gte('created_at', monthStart.toISOString())
     earningsThisMonth    = (ledger ?? []).reduce((s, r) => s + r.amount_cents, 0)
     collectionsThisMonth = (ledger ?? []).filter(r => r.event_type === 'collection').length
+  } else {
+    const { data: summary } = await server
+      .from('school_ledger_summary')
+      .select('grand_total_cents, direct_earnings_cents')
+      .eq('school_id', schoolId)
+      .eq('month', currentMonth)
+      .maybeSingle()
+
+    earningsThisMonth = summary?.grand_total_cents ?? 0
+
+    if (!summary) {
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
+      const { data: ledger } = await server
+        .from('school_ledger')
+        .select('amount_cents, event_type')
+        .eq('school_id', schoolId)
+        .gte('created_at', monthStart.toISOString())
+      earningsThisMonth    = (ledger ?? []).reduce((s, r) => s + r.amount_cents, 0)
+      collectionsThisMonth = (ledger ?? []).filter(r => r.event_type === 'collection').length
+    }
   }
 
   // Format — only waybill-safe fields

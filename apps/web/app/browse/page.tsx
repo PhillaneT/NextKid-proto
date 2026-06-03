@@ -123,14 +123,13 @@ export default function BrowsePage() {
       const { data: schoolData } = await query.in('seller_school_id', schoolIds);
       setItems((schoolData as unknown as Item[]) ?? []);
 
-      // Fetch other listings (not from user's schools) — limit to 20
+      // Fetch other listings (not from user's schools)
       let otherQuery = supabase
         .from('listings')
         .select(baseSelect)
         .eq('status', 'ACTIVE')
         .not('seller_school_id', 'in', `(${schoolIds.join(',')})`)
-        .order('created_at', { ascending: false })
-        .limit(20);
+        .order('created_at', { ascending: false });
 
       if (category !== 'All') otherQuery = otherQuery.eq('category', category);
       if (debouncedSearch) otherQuery = otherQuery.ilike('title', `%${debouncedSearch}%`);

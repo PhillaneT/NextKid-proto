@@ -838,12 +838,20 @@ export default function ItemPage() {
                   </span>
                 </div>
 
+                {/* Multi-item banner — shown prominently before price */}
+                {item.is_multi_item && item.available_count > 0 && (
+                  <div className="flex items-center gap-2 bg-[#fde8ea] border border-[#BE1E2D]/30 rounded-xl px-4 py-3 mb-4">
+                    <Box size={16} strokeWidth={2} className="text-[#BE1E2D] shrink-0" />
+                    <p className="text-sm font-semibold text-[#BE1E2D]">
+                      Bundle listing — {item.available_count} item{item.available_count !== 1 ? 's' : ''} available
+                    </p>
+                    <span className="ml-auto text-xs text-[#BE1E2D] font-medium bg-white border border-[#BE1E2D]/30 rounded-full px-2 py-0.5">Pick what you need</span>
+                  </div>
+                )}
+
                 <div className="text-4xl font-bold text-[#BE1E2D] mb-6">
                   {item.is_multi_item ? `from R${(item.price_cents / 100).toLocaleString()}` : `R${(item.price_cents / 100).toLocaleString()}`}
                 </div>
-                {item.is_multi_item && item.available_count > 0 && (
-                  <p className="text-sm text-[#979797] -mt-4 mb-6">{item.available_count} item{item.available_count !== 1 ? 's' : ''} available · select below</p>
-                )}
 
                 {/* Buyer actions — shown to all non-owners */}
                 {!isOwner && (
@@ -854,6 +862,71 @@ export default function ItemPage() {
                         <button onClick={() => router.push('/')} className="px-6 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] text-white rounded-full text-sm font-medium transition">Sign In</button>
                       </div>
                     )}
+
+                    {/* Multi-item selector — shown FIRST so buyer sees it immediately */}
+                    {isLoggedIn && item.is_multi_item && listingItems.length > 0 && (
+                      <div className="bg-[#fff9f9] border-2 border-[#BE1E2D]/30 rounded-2xl p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={16} strokeWidth={2} className="text-[#BE1E2D]" />
+                          <p className="text-sm font-bold text-[#111]">
+                            Choose the items you want
+                          </p>
+                          <span className="ml-auto text-xs text-[#979797]">{item.available_count} available</span>
+                        </div>
+                        <div className="border border-[#dedede] rounded-xl overflow-hidden divide-y divide-[#dedede] bg-white">
+                          {listingItems.map(li => {
+                            const checked = selectedItemIds.has(li.id);
+                            return (
+                              <button key={li.id} type="button"
+                                onClick={() => toggleItemSelect(li.id)}
+                                className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition ${checked ? 'bg-[#fde8ea]' : 'hover:bg-[#f4f4f4]'}`}
+                              >
+                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition ${checked ? 'bg-[#BE1E2D] border-[#BE1E2D]' : 'border-[#dedede]'}`}>
+                                  {checked && <Check size={12} strokeWidth={3} className="text-white" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm font-medium text-[#111]">{li.name}</span>
+                                  {li.size_label && <span className="text-xs text-[#979797] ml-2">Size {li.size_label}</span>}
+                                </div>
+                                <span className="text-sm font-bold text-[#BE1E2D] shrink-0">R{(li.price_cents / 100).toFixed(2)}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {selectedItemIds.size > 0 && (
+                          <div className="flex items-center justify-between px-1 py-1">
+                            <span className="text-sm text-[#979797]">{selectedItemIds.size} item{selectedItemIds.size !== 1 ? 's' : ''} selected</span>
+                            <span className="text-base font-bold text-[#BE1E2D]">
+                              Total R{(listingItems.filter(i => selectedItemIds.has(i.id)).reduce((s, i) => s + i.price_cents, 0) / 100).toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        {has(item.id) ? (
+                          <button onClick={() => router.push('/cart')}
+                            className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-full transition flex items-center justify-center gap-2">
+                            <Check size={16} strokeWidth={2.5} /> Added — View Cart
+                          </button>
+                        ) : (
+                          <button onClick={handleAddSelectedToCart} disabled={selectedItemIds.size === 0}
+                            className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] disabled:text-[#979797] disabled:cursor-not-allowed text-white font-semibold rounded-full transition flex items-center justify-center gap-2">
+                            <ShoppingCart size={16} strokeWidth={2} />
+                            {selectedItemIds.size === 0 ? '← Tick the items you want above' : `Add ${selectedItemIds.size} item${selectedItemIds.size !== 1 ? 's' : ''} to cart`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {isLoggedIn && item.is_multi_item && listingItems.length === 0 && (
+                      <div className="w-full py-4 text-center text-[#979797] text-sm bg-[#f4f4f4] rounded-full">All items sold</div>
+                    )}
+
+                    {isLoggedIn && !item.is_multi_item && (
+                      <button onClick={handleBuyNow}
+                        className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] text-white font-semibold rounded-full transition">
+                        ⚡ Buy Now — R{(item.price_cents / 100).toLocaleString()}
+                      </button>
+                    )}
+
                     {isLoggedIn && (
                       <button
                         onClick={toggleWishlist}
@@ -867,62 +940,6 @@ export default function ItemPage() {
                         <Heart size={16} strokeWidth={2} fill={wishlisted ? '#BE1E2D' : 'none'} />
                         {wishlisted ? 'Saved to Wishlist' : 'Save to Wishlist'}
                       </button>
-                    )}
-                    {isLoggedIn && item.is_multi_item && listingItems.length > 0 && (
-                      <div className="space-y-3 mb-4">
-                        <p className="text-sm font-semibold text-[#111]">
-                          Select the items you want <span className="text-[#979797] font-normal">({item.available_count} available)</span>
-                        </p>
-                        <div className="border border-[#dedede] rounded-2xl overflow-hidden divide-y divide-[#dedede]">
-                          {listingItems.map(li => {
-                            const checked = selectedItemIds.has(li.id);
-                            return (
-                              <button key={li.id} type="button"
-                                onClick={() => toggleItemSelect(li.id)}
-                                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition ${checked ? 'bg-red-50' : 'hover:bg-[#f4f4f4]'}`}
-                              >
-                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition ${checked ? 'bg-[#BE1E2D] border-[#BE1E2D]' : 'border-[#dedede]'}`}>
-                                  {checked && <Check size={12} strokeWidth={3} className="text-white" />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-sm font-medium text-[#111]">{li.name}</span>
-                                  {li.size_label && <span className="text-xs text-[#979797] ml-2">{li.size_label}</span>}
-                                </div>
-                                <span className="text-sm font-bold text-[#BE1E2D] shrink-0">R{(li.price_cents / 100).toFixed(2)}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {selectedItemIds.size > 0 && (
-                          <div className="flex items-center justify-between px-1">
-                            <span className="text-sm text-[#979797]">{selectedItemIds.size} item{selectedItemIds.size !== 1 ? 's' : ''} selected</span>
-                            <span className="text-sm font-bold text-[#BE1E2D]">
-                              Total R{(listingItems.filter(i => selectedItemIds.has(i.id)).reduce((s, i) => s + i.price_cents, 0) / 100).toFixed(2)}
-                            </span>
-                          </div>
-                        )}
-                        {has(item.id) ? (
-                          <button onClick={() => router.push('/cart')}
-                            className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-full transition flex items-center justify-center gap-2">
-                            <Check size={16} strokeWidth={2.5} /> Added — View Cart
-                          </button>
-                        ) : (
-                          <button onClick={handleAddSelectedToCart} disabled={selectedItemIds.size === 0}
-                            className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold rounded-full transition flex items-center justify-center gap-2">
-                            <ShoppingCart size={16} strokeWidth={2} />
-                            {selectedItemIds.size === 0 ? 'Select items above' : `Add ${selectedItemIds.size} item${selectedItemIds.size !== 1 ? 's' : ''} to cart`}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {isLoggedIn && !item.is_multi_item && (
-                      <button onClick={handleBuyNow}
-                        className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] text-white font-semibold rounded-full transition">
-                        ⚡ Buy Now — R{(item.price_cents / 100).toLocaleString()}
-                      </button>
-                    )}
-                    {isLoggedIn && item.is_multi_item && listingItems.length === 0 && (
-                      <div className="w-full py-4 text-center text-[#979797] text-sm bg-[#f4f4f4] rounded-full">All items sold</div>
                     )}
                   </div>
                 )}

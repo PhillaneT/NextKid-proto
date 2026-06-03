@@ -53,6 +53,8 @@ type Listing = {
   seller_school_id: string | null;
   condition: string | null;
   created_at: string;
+  is_multi_item: boolean;
+  available_count: number;
   schools: { name: string } | null;
 };
 
@@ -120,11 +122,11 @@ export default function HomeScreen() {
     setLoading(true);
     supabase
       .from('listings')
-      .select('id, title, category, price_cents, images, seller_id, seller_school_id, condition, created_at, schools(name)')
+      .select('id, title, category, price_cents, images, seller_id, seller_school_id, condition, created_at, is_multi_item, available_count, schools(name)')
       .eq('status', 'ACTIVE')
       .order('created_at', { ascending: false })
       .limit(40)
-      .then(({ data }) => { setListings((data as Listing[]) ?? []); setLoading(false); });
+      .then(({ data }) => { setListings((data as unknown as Listing[]) ?? []); setLoading(false); });
   }, []);
 
   // Debounce search input 300ms
@@ -149,12 +151,12 @@ export default function HomeScreen() {
     if (tab !== 'my_school' || userSchoolIds.length === 0) { setOtherListings([]); return; }
     supabase
       .from('listings')
-      .select('id, title, category, price_cents, images, seller_id, seller_school_id, condition, created_at, schools(name)')
+      .select('id, title, category, price_cents, images, seller_id, seller_school_id, condition, created_at, is_multi_item, available_count, schools(name)')
       .eq('status', 'ACTIVE')
       .not('seller_school_id', 'in', `(${userSchoolIds.join(',')})`)
       .order('created_at', { ascending: false })
       .limit(20)
-      .then(({ data }) => setOtherListings((data as Listing[]) ?? []));
+      .then(({ data }) => setOtherListings((data as unknown as Listing[]) ?? []));
   }, [tab, userSchoolIds]);
 
   async function toggleWishlist(listingId: string) {
@@ -443,6 +445,11 @@ function ListingCard({ item, wishlistIds, wishlistLoading, has, add, toggleWishl
         ) : (
           <CategoryIcon name={item.category} color="#dedede" size={36} />
         )}
+        {item.is_multi_item && item.available_count > 0 && (
+          <View style={styles.bundleChip}>
+            <Text style={styles.bundleText}>Bundle · {item.available_count} items</Text>
+          </View>
+        )}
         <View style={styles.timeChip}>
           <Text style={styles.timeText}>{timeAgo(item.created_at)}</Text>
         </View>
@@ -539,6 +546,8 @@ const styles = StyleSheet.create({
 
   card:          { flex: 1, backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: BORDER },
   cardImageWrap: { width: '100%', aspectRatio: 1, backgroundColor: SURFACE, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  bundleChip:    { position: 'absolute', top: 6, left: 6, backgroundColor: CRIMSON, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3 },
+  bundleText:    { color: '#fff', fontSize: 9, fontWeight: '700' },
   timeChip:      { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
   timeText:      { color: '#555', fontSize: 9, fontWeight: '500' },
   cardBody:      { padding: 10 },

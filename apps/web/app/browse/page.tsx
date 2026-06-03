@@ -41,6 +41,8 @@ type Item = {
   seller_school_id: string | null;
   is_school_specific: boolean;
   size: string | null;
+  is_multi_item: boolean;
+  available_count: number;
   schools: { name: string } | null;
 };
 
@@ -101,7 +103,7 @@ export default function BrowsePage() {
     setLoading(true);
     setOtherItems([]);
 
-    const baseSelect = 'id, title, category, price_cents, images, seller_id, seller_school_id, is_school_specific, size, schools(name)';
+    const baseSelect = 'id, title, category, price_cents, images, seller_id, seller_school_id, is_school_specific, size, is_multi_item, available_count, schools(name)';
 
     let query = supabase
       .from('listings')
@@ -119,7 +121,7 @@ export default function BrowsePage() {
 
       // Fetch school-specific items
       const { data: schoolData } = await query.in('seller_school_id', schoolIds);
-      setItems((schoolData as Item[]) ?? []);
+      setItems((schoolData as unknown as Item[]) ?? []);
 
       // Fetch other listings (not from user's schools) — limit to 20
       let otherQuery = supabase
@@ -134,11 +136,11 @@ export default function BrowsePage() {
       if (debouncedSearch) otherQuery = otherQuery.ilike('title', `%${debouncedSearch}%`);
 
       const { data: otherData } = await otherQuery;
-      setOtherItems((otherData as Item[]) ?? []);
+      setOtherItems((otherData as unknown as Item[]) ?? []);
     } else {
       const { data, error } = await query;
       if (error) console.error('Browse error:', error);
-      setItems((data as Item[]) ?? []);
+      setItems((data as unknown as Item[]) ?? []);
     }
 
     setLoading(false);
@@ -332,7 +334,7 @@ function ListingCard({
       className="bg-white border border-[#dedede] rounded-2xl overflow-hidden hover:shadow-md hover:border-[#BE1E2D]/40 transition cursor-pointer group"
     >
       {/* Image */}
-      <div className="aspect-square bg-[#f4f4f4] overflow-hidden">
+      <div className="aspect-square bg-[#f4f4f4] overflow-hidden relative">
         {item.images?.[0] ? (
           <img
             src={item.images[0]}
@@ -342,6 +344,11 @@ function ListingCard({
         ) : (
           <div className="w-full h-full flex items-center justify-center text-[#dedede]">
             {CATEGORY_ICON_LG[item.category as ListingCategory] ?? <Package size={32} strokeWidth={1.5} />}
+          </div>
+        )}
+        {item.is_multi_item && item.available_count > 0 && (
+          <div className="absolute top-2 left-2 bg-[#BE1E2D] text-white text-[9px] font-bold px-2 py-0.5 rounded-full">
+            Bundle · {item.available_count} items
           </div>
         )}
       </div>

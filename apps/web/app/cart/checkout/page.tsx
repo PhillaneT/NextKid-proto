@@ -35,8 +35,6 @@ function CartCheckoutInner() {
     const createdIds: string[] = []
 
     for (const item of items) {
-      // Create a PENDING_PAYMENT order for each item
-      // Shipping quote is collected per-item in the individual order page
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: {
@@ -45,7 +43,7 @@ function CartCheckoutInner() {
         },
         body: JSON.stringify({
           listingId: item.listingId,
-          selectedQuote: null,  // buyer selects shipping on the order page
+          selectedQuote: null,
           cartCheckout: true,
         }),
       })
@@ -53,6 +51,11 @@ function CartCheckoutInner() {
       if (res.ok && json.orderId) {
         createdIds.push(json.orderId)
         remove(item.listingId)
+        // Remove from wishlist — fire-and-forget, don't block on failure
+        fetch(`/api/wishlist/${item.listingId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).catch(() => {})
       } else {
         setError(`Could not order "${item.title}": ${json.error ?? 'unknown error'}`)
         break

@@ -10,7 +10,7 @@ import Image from 'next/image'
 type SellerInfo = { id: string; name: string }
 
 export default function CartPage() {
-  const { items, remove, clear, bySeller, count } = useCart()
+  const { items, remove, clear, bySeller, count, isLoaded } = useCart()
   const router = useRouter()
   const [sellers, setSellers] = useState<Record<string, SellerInfo>>({})
 
@@ -35,6 +35,14 @@ export default function CartPage() {
 
   const sellerTotal = (sellerId: string) =>
     (bySeller[sellerId] ?? []).reduce((s, i) => s + i.price_cents, 0)
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <p className="text-[#979797] text-sm">Loading cart…</p>
+      </div>
+    )
+  }
 
   if (count === 0) {
     return (

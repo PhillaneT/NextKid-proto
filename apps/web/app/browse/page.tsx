@@ -242,7 +242,7 @@ export default function BrowsePage() {
         ) : (
           <>
             {/* My school listings */}
-            {items.length > 0 && (
+            {items.length > 0 ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {items.map(item => (
                   <ListingCard
@@ -265,10 +265,40 @@ export default function BrowsePage() {
                   />
                 ))}
               </div>
-            )}
+            ) : tab === 'my_school' && otherItems.length > 0 ? (
+              /* No school listings yet — promote all SA listings as the main grid */
+              <>
+                <div className="flex items-center gap-2 bg-[#fdf6f6] border border-[#BE1E2D]/20 rounded-xl px-4 py-3 mb-6 text-sm text-[#BE1E2D]">
+                  <SchoolIcon size={14} strokeWidth={2} className="shrink-0" />
+                  <span>No listings from your school yet — showing all listings across South Africa.</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {otherItems.map(item => (
+                    <ListingCard
+                      key={item.id}
+                      item={item}
+                      wishlisted={wishlistIds.has(item.id)}
+                      wishlistLoading={wishlistLoading === item.id}
+                      inCart={has(item.id)}
+                      onToggleWishlist={toggleWishlist}
+                      onAddToCart={() => add({
+                        listingId: item.id,
+                        title: item.title,
+                        price_cents: item.price_cents,
+                        image: item.images?.[0] ?? null,
+                        sellerId: item.seller_id,
+                        category: item.category,
+                        size: item.size,
+                      })}
+                      onClick={() => router.push(`/item/${item.id}`)}
+                    />
+                  ))}
+                </div>
+              </>
+            ) : null}
 
-            {/* Other listings section — only shown on My School tab */}
-            {tab === 'my_school' && otherItems.length > 0 && (
+            {/* Other listings section — only shown when school has its own listings too */}
+            {tab === 'my_school' && items.length > 0 && otherItems.length > 0 && (
               <div className="mt-12">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="flex-1 h-px bg-[#dedede]" />

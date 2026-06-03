@@ -1,5 +1,7 @@
 'use client';
 
+'use client';
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -24,7 +26,7 @@ type WishlistEntry = {
 
 export default function WishlistPage() {
   const router = useRouter();
-  const { add, has } = useCart();
+  const { add, has, isLoaded } = useCart();
   const [items, setItems] = useState<WishlistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -157,7 +159,11 @@ export default function WishlistPage() {
 
                     <div className="flex items-center gap-2">
                       {!isSold && (
-                        has(listing.id) ? (
+                        !isLoaded ? (
+                          <button disabled className="flex-1 flex items-center justify-center gap-1 py-2 bg-[#dedede] text-white text-xs font-medium rounded-full cursor-not-allowed">
+                            <ShoppingCart size={12} strokeWidth={2} /> Add to cart
+                          </button>
+                        ) : has(listing.id) ? (
                           <button
                             onClick={() => router.push('/cart')}
                             className="flex-1 flex items-center justify-center gap-1 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-full transition"
@@ -166,15 +172,18 @@ export default function WishlistPage() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => add({
-                              listingId: listing.id,
-                              title: listing.title,
-                              price_cents: listing.price_cents,
-                              image: listing.images?.[0] ?? null,
-                              sellerId: listing.seller_id,
-                              category: listing.category,
-                              size: listing.size,
-                            })}
+                            onClick={() => {
+                              add({
+                                listingId: listing.id,
+                                title: listing.title,
+                                price_cents: listing.price_cents,
+                                image: listing.images?.[0] ?? null,
+                                sellerId: listing.seller_id,
+                                category: listing.category,
+                                size: listing.size,
+                              });
+                              router.push('/cart');
+                            }}
                             className="flex-1 flex items-center justify-center gap-1 py-2 bg-[#BE1E2D] hover:bg-[#9B1824] text-white text-xs font-medium rounded-full transition"
                           >
                             <ShoppingCart size={12} strokeWidth={2} /> Add to cart

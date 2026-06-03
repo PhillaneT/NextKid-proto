@@ -25,6 +25,7 @@ export interface CartItem {
 interface CartContextValue {
   items: CartItem[]
   count: number
+  isLoaded: boolean
   add: (item: CartItem) => void
   remove: (listingId: string) => void
   has: (listingId: string) => boolean
@@ -39,13 +40,24 @@ const STORAGE_KEY = 'nextkid_cart'
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([])
+  const [isLoaded, setIsLoaded] = useState(false)
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount — deduplicate on read to fix any existing duplicates
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored) setItems(JSON.parse(stored))
+      if (stored) {
+        const parsed: CartItem[] = JSON.parse(stored)
+        const seen = new Set<string>()
+        const deduped = parsed.filter(item => {
+          if (seen.has(item.listingId)) return false
+          seen.add(item.listingId)
+          return true
+        })
+        setItems(deduped)
+      }
     } catch { /* ignore */ }
+    setIsLoaded(true)
   }, [])
 
   // Persist to localStorage on change
@@ -77,7 +89,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, {})
 
   return (
-    <CartContext.Provider value={{ items, count: items.length, add, remove, has, clear, bySeller }}>
+    <CartContext.Provider value={{ items, count: items.length, isLoaded, add, remove, has, clear, bySeller }}>
       {children}
     </CartContext.Provider>
   )

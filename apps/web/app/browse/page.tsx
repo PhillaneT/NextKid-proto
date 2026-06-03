@@ -41,6 +41,7 @@ type Item = {
   seller_school_id: string | null;
   is_school_specific: boolean;
   size: string | null;
+  schools: { name: string } | null;
 };
 
 type BrowseTab = 'my_school' | 'all';
@@ -51,6 +52,7 @@ export default function BrowsePage() {
   const { add, has } = useCart();
   const [tab, setTab] = useState<BrowseTab>('all');
   const [items, setItems] = useState<Item[]>([]);
+  const [otherItems, setOtherItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [wishlistIds, setWishlistIds] = useState<Set<string>>(new Set());
   const [wishlistLoading, setWishlistLoading] = useState<string | null>(null);
@@ -59,13 +61,11 @@ export default function BrowsePage() {
   const [debouncedSearch, setDebouncedSearch] = useState(searchParams.get('q') ?? '');
   const [userSchools, setUserSchools] = useState<School[]>([]);
 
-  // RULE: debounce search input at 300ms to keep results fast
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), PLATFORM_DEFAULTS.SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [search]);
 
-  // Load the user's saved schools for the "My School" tab, and their wishlist IDs
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return;
@@ -86,12 +86,10 @@ export default function BrowsePage() {
     });
   }, []);
 
-  // Default to My School tab once schools are loaded
   useEffect(() => {
     if (userSchools.length > 0) setTab('my_school');
   }, [userSchools]);
 
-  // Apply category filter from URL param
   useEffect(() => {
     const cat = searchParams.get('category');
     if (cat && ALL_CATEGORIES.includes(cat as ListingCategory)) {
@@ -101,9 +99,13 @@ export default function BrowsePage() {
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
+    setOtherItems([]);
+
+    const baseSelect = 'id, title, category, price_cents, images, seller_id, seller_school_id, is_school_specific, size, schools(name)';
+
     let query = supabase
       .from('listings')
-      .select('id, title, category, price_cents, images, seller_id, seller_school_id, is_school_specific, size')
+      .select(baseSelect)
       .eq('status', 'ACTIVE')
       .order('created_at', { ascending: false });
 
@@ -111,16 +113,34 @@ export default function BrowsePage() {
     if (debouncedSearch) query = query.ilike('title', `%${debouncedSearch}%`);
 
     if (tab === 'my_school') {
-      // No school saved — return nothing (user needs to add a school first)
       if (userSchools.length === 0) { setItems([]); setLoading(false); return; }
-      // Show items linked to the user's schools
-      query = query.in('seller_school_id', userSchools.map(s => s.id));
-    }
-    // All Items tab — no school filter, everything is visible for maximum seller reach
 
-    const { data, error } = await query;
-    if (error) console.error('Browse error:', error);
-    setItems(data ?? []);
+      const schoolIds = userSchools.map(s => s.id);
+
+      // Fetch school-specific items
+      const { data: schoolData } = await query.in('seller_school_id', schoolIds);
+      setItems((schoolData as Item[]) ?? []);
+
+      // Fetch other listings (not from user's schools) — limit to 20
+      let otherQuery = supabase
+        .from('listings')
+        .select(baseSelect)
+        .eq('status', 'ACTIVE')
+        .not('seller_school_id', 'in', `(${schoolIds.join(',')})`)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (category !== 'All') otherQuery = otherQuery.eq('category', category);
+      if (debouncedSearch) otherQuery = otherQuery.ilike('title', `%${debouncedSearch}%`);
+
+      const { data: otherData } = await otherQuery;
+      setOtherItems((otherData as Item[]) ?? []);
+    } else {
+      const { data, error } = await query;
+      if (error) console.error('Browse error:', error);
+      setItems((data as Item[]) ?? []);
+    }
+
     setLoading(false);
   }, [category, debouncedSearch, tab, userSchools]);
 
@@ -210,7 +230,7 @@ export default function BrowsePage() {
         {/* Results */}
         {loading ? (
           <div className="flex items-center justify-center py-24 text-[#979797]">Loading...</div>
-        ) : items.length === 0 ? (
+        ) : items.length === 0 && otherItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <Search size={48} strokeWidth={1.5} className="text-[#dedede] mb-4" />
             <p className="text-[#111] font-semibold">No listings found</p>
@@ -219,85 +239,162 @@ export default function BrowsePage() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {items.map(item => (
-              <div
-                key={item.id}
-                onClick={() => router.push(`/item/${item.id}`)}
-                className="bg-white border border-[#dedede] rounded-2xl overflow-hidden hover:shadow-md hover:border-[#BE1E2D]/40 transition cursor-pointer group"
-              >
-                {/* Image */}
-                <div className="aspect-square bg-[#f4f4f4] overflow-hidden">
-                  {item.images?.[0] ? (
-                    <img
-                      src={item.images[0]}
-                      alt={item.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-[#dedede]">
-                      {CATEGORY_ICON_LG[item.category as ListingCategory] ?? <Package size={32} strokeWidth={1.5} />}
-                    </div>
-                  )}
-                </div>
+          <>
+            {/* My school listings */}
+            {items.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {items.map(item => (
+                  <ListingCard
+                    key={item.id}
+                    item={item}
+                    wishlisted={wishlistIds.has(item.id)}
+                    wishlistLoading={wishlistLoading === item.id}
+                    inCart={has(item.id)}
+                    onToggleWishlist={toggleWishlist}
+                    onAddToCart={() => add({
+                      listingId: item.id,
+                      title: item.title,
+                      price_cents: item.price_cents,
+                      image: item.images?.[0] ?? null,
+                      sellerId: item.seller_id,
+                      category: item.category,
+                      size: item.size,
+                    })}
+                    onClick={() => router.push(`/item/${item.id}`)}
+                  />
+                ))}
+              </div>
+            )}
 
-                {/* Details */}
-                <div className="p-3">
-                  <p className="text-xs text-[#979797] mb-1 flex items-center gap-1">
-                    <span className="text-[#979797]">{CATEGORY_ICON[item.category as ListingCategory] ?? null}</span>
-                    <span>{item.category}</span>
-                    {item.size && <span className="ml-auto bg-[#f4f4f4] px-1.5 py-0.5 rounded text-[10px]">Size {item.size}</span>}
-                  </p>
-                  <h3 className="text-sm font-medium text-[#111] line-clamp-2 leading-snug mb-2">{item.title}</h3>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-base font-bold text-[#BE1E2D]">R{(item.price_cents / 100).toLocaleString()}</p>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Wishlist heart */}
-                      <button
-                        onClick={e => toggleWishlist(e, item.id)}
-                        disabled={wishlistLoading === item.id}
-                        className={`p-1.5 rounded-full border transition ${
-                          wishlistIds.has(item.id)
-                            ? 'border-[#BE1E2D] text-[#BE1E2D]'
-                            : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
-                        }`}
-                        title={wishlistIds.has(item.id) ? 'Remove from wishlist' : 'Save to wishlist'}
-                      >
-                        <Heart size={13} strokeWidth={2} fill={wishlistIds.has(item.id) ? '#BE1E2D' : 'none'} />
-                      </button>
-                      {/* Cart */}
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          add({
-                            listingId: item.id,
-                            title: item.title,
-                            price_cents: item.price_cents,
-                            image: item.images?.[0] ?? null,
-                            sellerId: item.seller_id,
-                            category: item.category,
-                            size: item.size,
-                          });
-                        }}
-                        className={`p-1.5 rounded-full border transition ${
-                          has(item.id)
-                            ? 'bg-[#BE1E2D] border-[#BE1E2D] text-white'
-                            : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
-                        }`}
-                        title={has(item.id) ? 'In cart' : 'Add to cart'}
-                      >
-                        {has(item.id)
-                          ? <Check size={13} strokeWidth={2.5} />
-                          : <ShoppingCart size={13} strokeWidth={2} />
-                        }
-                      </button>
-                    </div>
-                  </div>
+            {/* Other listings section — only shown on My School tab */}
+            {tab === 'my_school' && otherItems.length > 0 && (
+              <div className="mt-12">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="flex-1 h-px bg-[#dedede]" />
+                  <p className="text-sm font-semibold text-[#979797] shrink-0">Other listings across South Africa</p>
+                  <div className="flex-1 h-px bg-[#dedede]" />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {otherItems.map(item => (
+                    <ListingCard
+                      key={item.id}
+                      item={item}
+                      wishlisted={wishlistIds.has(item.id)}
+                      wishlistLoading={wishlistLoading === item.id}
+                      inCart={has(item.id)}
+                      onToggleWishlist={toggleWishlist}
+                      onAddToCart={() => add({
+                        listingId: item.id,
+                        title: item.title,
+                        price_cents: item.price_cents,
+                        image: item.images?.[0] ?? null,
+                        sellerId: item.seller_id,
+                        category: item.category,
+                        size: item.size,
+                      })}
+                      onClick={() => router.push(`/item/${item.id}`)}
+                    />
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Listing card ──────────────────────────────────────────────────────────────
+
+function ListingCard({
+  item,
+  wishlisted,
+  wishlistLoading,
+  inCart,
+  onToggleWishlist,
+  onAddToCart,
+  onClick,
+}: {
+  item: Item;
+  wishlisted: boolean;
+  wishlistLoading: boolean;
+  inCart: boolean;
+  onToggleWishlist: (e: React.MouseEvent, id: string) => void;
+  onAddToCart: () => void;
+  onClick: () => void;
+}) {
+  const schoolName = item.schools?.name ?? null;
+
+  return (
+    <div
+      onClick={onClick}
+      className="bg-white border border-[#dedede] rounded-2xl overflow-hidden hover:shadow-md hover:border-[#BE1E2D]/40 transition cursor-pointer group"
+    >
+      {/* Image */}
+      <div className="aspect-square bg-[#f4f4f4] overflow-hidden">
+        {item.images?.[0] ? (
+          <img
+            src={item.images[0]}
+            alt={item.title}
+            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-[#dedede]">
+            {CATEGORY_ICON_LG[item.category as ListingCategory] ?? <Package size={32} strokeWidth={1.5} />}
           </div>
         )}
+      </div>
+
+      {/* Details */}
+      <div className="p-3">
+        {/* School name badge */}
+        {schoolName && (
+          <div className="flex items-center gap-1 mb-1.5">
+            <SchoolIcon size={10} strokeWidth={2} className="text-[#BE1E2D] shrink-0" />
+            <span className="text-[10px] text-[#BE1E2D] font-medium truncate">{schoolName}</span>
+          </div>
+        )}
+
+        <p className="text-xs text-[#979797] mb-1 flex items-center gap-1">
+          <span className="text-[#979797]">{CATEGORY_ICON[item.category as ListingCategory] ?? null}</span>
+          <span>{item.category}</span>
+          {item.size && <span className="ml-auto bg-[#f4f4f4] px-1.5 py-0.5 rounded text-[10px]">Size {item.size}</span>}
+        </p>
+        <h3 className="text-sm font-medium text-[#111] line-clamp-2 leading-snug mb-2">{item.title}</h3>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-base font-bold text-[#BE1E2D]">R{(item.price_cents / 100).toLocaleString()}</p>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Wishlist heart */}
+            <button
+              onClick={e => onToggleWishlist(e, item.id)}
+              disabled={wishlistLoading}
+              className={`p-1.5 rounded-full border transition ${
+                wishlisted
+                  ? 'border-[#BE1E2D] text-[#BE1E2D]'
+                  : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
+              }`}
+              title={wishlisted ? 'Remove from wishlist' : 'Save to wishlist'}
+            >
+              <Heart size={13} strokeWidth={2} fill={wishlisted ? '#BE1E2D' : 'none'} />
+            </button>
+            {/* Cart */}
+            <button
+              onClick={e => { e.stopPropagation(); onAddToCart(); }}
+              className={`p-1.5 rounded-full border transition ${
+                inCart
+                  ? 'bg-[#BE1E2D] border-[#BE1E2D] text-white'
+                  : 'border-[#dedede] text-[#979797] hover:border-[#BE1E2D] hover:text-[#BE1E2D]'
+              }`}
+              title={inCart ? 'In cart' : 'Add to cart'}
+            >
+              {inCart
+                ? <Check size={13} strokeWidth={2.5} />
+                : <ShoppingCart size={13} strokeWidth={2} />
+              }
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

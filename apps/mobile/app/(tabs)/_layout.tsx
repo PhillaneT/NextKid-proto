@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Tag, ShoppingBag, Bell, User } from 'lucide-react-native';
+import { Home, Tag, ShoppingBag, Bell, User, Heart } from 'lucide-react-native';
 
 const CRIMSON  = '#BE1E2D';
 const INACTIVE = '#979797';
@@ -38,6 +38,13 @@ export default function TabLayout() {
         options={{
           title: 'Orders',
           tabBarIcon: ({ color }) => <ShoppingBag size={22} strokeWidth={2} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="wishlist"
+        options={{
+          title: 'Wishlist',
+          tabBarIcon: ({ color, focused }) => <Heart size={22} strokeWidth={2} color={color} fill={focused ? color : 'none'} />,
         }}
       />
       <Tabs.Screen

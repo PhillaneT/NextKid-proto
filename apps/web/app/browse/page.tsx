@@ -211,7 +211,7 @@ export default function BrowsePage() {
 
         {/* Category pills */}
         <div className="flex gap-1.5 mb-8 flex-wrap">
-          {(['All', ...ALL_CATEGORIES.filter(c => c !== 'Other')] as Array<ListingCategory | 'All'>).map(cat => (
+          {(['All', ...ALL_CATEGORIES] as Array<ListingCategory | 'All'>).map(cat => (
             <button
               key={cat}
               onClick={() => setCategory(cat)}

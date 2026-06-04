@@ -179,7 +179,7 @@ export default function HomeScreen() {
     setWishlistLoading(null);
   }
 
-  const CATS = ['', ...ALL_CATEGORIES.filter(c => c !== 'Other')] as const;
+  const CATS = ['', ...ALL_CATEGORIES] as const;
 
   return (
     <SafeAreaView style={styles.container}>

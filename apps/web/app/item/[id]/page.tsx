@@ -109,7 +109,7 @@ export default function ItemPage() {
   const [editForm, setEditForm] = useState({
     title: '', category: '', subcategory: '', price: '',
     description: '',
-    size: '', gender: '', grade: '', is_school_specific: false,
+    size: '', gender: '', grade: '', condition: '', is_school_specific: false,
   });
   const [editSchoolId, setEditSchoolId] = useState<string | null>(null);
   const [editSchoolName, setEditSchoolName] = useState('');
@@ -206,6 +206,7 @@ export default function ItemPage() {
       description: data.description || '',
       size: data.size || '', gender: data.gender || '',
       grade: data.grade ? String(data.grade) : '',
+      condition: data.condition || '',
       is_school_specific: data.is_school_specific || false,
     });
     setEditSchoolId(data.seller_school_id || null);
@@ -306,6 +307,7 @@ export default function ItemPage() {
       title: editForm.title, category: editForm.category, subcategory: editForm.subcategory || null,
       price_cents: newPriceCents,
       description: editForm.description || null,
+      condition: editForm.condition || null,
       size: editForm.size || null, gender: editForm.gender || null,
       grade: editForm.grade ? parseInt(editForm.grade) : null,
       is_school_specific: editForm.is_school_specific,
@@ -815,6 +817,26 @@ export default function ItemPage() {
                   <label className="block text-sm font-medium text-[#111] mb-1.5">Price (Rands)</label>
                   <input type="number" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
                     className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D]" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#111] mb-1.5">Condition</label>
+                  <select value={editForm.condition ?? ''} onChange={e => setEditForm({ ...editForm, condition: e.target.value })}
+                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D]">
+                    <option value="">Select condition...</option>
+                    {LISTING_CONDITIONS.map(c => (
+                      <option key={c} value={c}>{c.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#111] mb-1.5">Description</label>
+                  <textarea
+                    value={editForm.description}
+                    onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                    rows={5}
+                    placeholder="Describe the item — condition details, why you're selling, measurements, etc."
+                    className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D] resize-none"
+                  />
                 </div>
               </div>
             ) : (

@@ -66,9 +66,9 @@ export default function NewListingPage() {
   // Step 1 — category
   const [category, setCategory] = useState<ListingCategory | ''>('');
   const isSchoolSpecific = SCHOOL_SPECIFIC_CATEGORIES.includes(category as typeof SCHOOL_SPECIFIC_CATEGORIES[number]);
-  // Books & Stationery can optionally be linked to a school
-  const isOptionalSchool = category === 'Books & Stationery';
-  const showsSchoolStep = isSchoolSpecific || isOptionalSchool;
+  // All three school-related categories have an optional school picker
+  const isOptionalSchool = isSchoolSpecific || category === 'Books & Stationery';
+  const showsSchoolStep = isOptionalSchool;
 
   // Step 2 — school picker (school-specific categories only)
   const [province, setProvince] = useState('');
@@ -363,10 +363,7 @@ export default function NewListingPage() {
                     </span>
                     <div className="min-w-0">
                       <span className="text-[#111] text-sm font-medium block truncate">{cat}</span>
-                      {SCHOOL_SPECIFIC_CATEGORIES.includes(cat as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) && (
-                        <span className="text-[#BE1E2D] text-xs block">School-specific</span>
-                      )}
-                      {cat === 'Books & Stationery' && (
+                      {(SCHOOL_SPECIFIC_CATEGORIES.includes(cat as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) || cat === 'Books & Stationery') && (
                         <span className="text-[#979797] text-xs block">Can link to school</span>
                       )}
                     </div>
@@ -383,15 +380,9 @@ export default function NewListingPage() {
           {/* ── Step 2 — School picker ────── */}
           {step === 2 && showsSchoolStep && <>
             <div>
-              <h2 className="text-[#111] font-semibold text-lg mb-1">
-                {isOptionalSchool ? 'Link to a school? (optional)' : 'Which school is this for?'}
-              </h2>
+              <h2 className="text-[#111] font-semibold text-lg mb-1">Link to a school? (optional)</h2>
               <p className="text-[#979797] text-sm mb-6">
-                {isOptionalSchool
-                  ? 'Linking your books to a school helps the right buyers find them. You can skip this if not applicable.'
-                  : profileSchools.length > 0
-                    ? 'Select which of your schools this item belongs to.'
-                    : 'Uniform and sports kit listings are linked to a school so the right buyers see them.'}
+                Linking your item to a school helps the right buyers find it. You can skip this if it's not school-specific.
               </p>
 
               {profileSchools.length > 0 ? (

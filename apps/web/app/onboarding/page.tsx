@@ -328,7 +328,19 @@ export default function OnboardingPage() {
               </div>
             )}
             {suburbQuery.length >= 2 && !searchingSuburbs && suburbResults.length === 0 && (
-              <p style={{ color: MUTED, fontSize: '12px', marginBottom: '12px' }}>No suburbs found — try a different name or postal code</p>
+              <div style={{ marginBottom: '12px' }}>
+                <p style={{ color: MUTED, fontSize: '12px', marginBottom: '8px' }}>No suburbs found for "{suburbQuery}"</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSuburbName(suburbQuery.trim());
+                    setSuburbId(`manual_${suburbQuery.trim().toLowerCase().replace(/\s+/g, '_')}`);
+                  }}
+                  style={{ fontSize: '12px', color: BLUE, background: 'none', border: `1px solid ${BLUE}`, borderRadius: '20px', padding: '5px 14px', cursor: 'pointer' }}
+                >
+                  Use "{suburbQuery.trim()}" as my suburb
+                </button>
+              </div>
             )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '4px 0 20px' }}>

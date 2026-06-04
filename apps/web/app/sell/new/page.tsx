@@ -66,6 +66,9 @@ export default function NewListingPage() {
   // Step 1 — category
   const [category, setCategory] = useState<ListingCategory | ''>('');
   const isSchoolSpecific = SCHOOL_SPECIFIC_CATEGORIES.includes(category as typeof SCHOOL_SPECIFIC_CATEGORIES[number]);
+  // Books & Stationery can optionally be linked to a school
+  const isOptionalSchool = category === 'Books & Stationery';
+  const showsSchoolStep = isSchoolSpecific || isOptionalSchool;
 
   // Step 2 — school picker (school-specific categories only)
   const [province, setProvince] = useState('');
@@ -298,8 +301,8 @@ export default function NewListingPage() {
 
   const nextStep = () => {
     if (step === 1 && !category) return;
-    if (step === 1 && isSchoolSpecific) {
-      if (profileSchools.length === 1) { setSelectedSchool(profileSchools[0]); setStep(3); return; }
+    if (step === 1 && showsSchoolStep) {
+      if (isSchoolSpecific && profileSchools.length === 1) { setSelectedSchool(profileSchools[0]); setStep(3); return; }
       setStep(2); return;
     }
     if (step === 1) { setStep(3); return; }
@@ -307,13 +310,13 @@ export default function NewListingPage() {
   };
 
   const prevStep = () => {
-    if (step === 3 && !isSchoolSpecific) { setStep(1); return; }
-    if (step === 3 && isSchoolSpecific && profileSchools.length === 1) { setStep(1); return; }
+    if (step === 3 && !showsSchoolStep) { setStep(1); return; }
+    if (step === 3 && showsSchoolStep && isSchoolSpecific && profileSchools.length === 1) { setStep(1); return; }
     if (step > 1) setStep((step - 1) as Step);
   };
 
-  const TOTAL_STEPS = isSchoolSpecific ? 5 : 4;
-  const displayStep = step === 1 ? 1 : step === 2 ? 2 : isSchoolSpecific ? step : step - 1;
+  const TOTAL_STEPS = showsSchoolStep ? 5 : 4;
+  const displayStep = step === 1 ? 1 : step === 2 ? 2 : showsSchoolStep ? step : step - 1;
 
   if (showSuccess) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
@@ -363,6 +366,9 @@ export default function NewListingPage() {
                       {SCHOOL_SPECIFIC_CATEGORIES.includes(cat as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) && (
                         <span className="text-[#BE1E2D] text-xs block">School-specific</span>
                       )}
+                      {cat === 'Books & Stationery' && (
+                        <span className="text-[#979797] text-xs block">Can link to school</span>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -374,14 +380,18 @@ export default function NewListingPage() {
             </button>
           </>}
 
-          {/* ── Step 2 — School picker (school-specific only) ────── */}
-          {step === 2 && isSchoolSpecific && <>
+          {/* ── Step 2 — School picker ────── */}
+          {step === 2 && showsSchoolStep && <>
             <div>
-              <h2 className="text-[#111] font-semibold text-lg mb-1">Which school is this for?</h2>
+              <h2 className="text-[#111] font-semibold text-lg mb-1">
+                {isOptionalSchool ? 'Link to a school? (optional)' : 'Which school is this for?'}
+              </h2>
               <p className="text-[#979797] text-sm mb-6">
-                {profileSchools.length > 0
-                  ? 'Select which of your schools this item belongs to.'
-                  : 'Uniform and sports kit listings are linked to a school so the right buyers see them.'}
+                {isOptionalSchool
+                  ? 'Linking your books to a school helps the right buyers find them. You can skip this if not applicable.'
+                  : profileSchools.length > 0
+                    ? 'Select which of your schools this item belongs to.'
+                    : 'Uniform and sports kit listings are linked to a school so the right buyers see them.'}
               </p>
 
               {profileSchools.length > 0 ? (
@@ -454,7 +464,13 @@ export default function NewListingPage() {
             </div>
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
-              <button onClick={nextStep} disabled={!selectedSchool}
+              {isOptionalSchool && (
+                <button onClick={() => { setSelectedSchool(null); setStep(3); }}
+                  className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition text-sm">
+                  Skip
+                </button>
+              )}
+              <button onClick={nextStep} disabled={!isOptionalSchool && !selectedSchool}
                 className="flex-grow py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 Continue →
               </button>

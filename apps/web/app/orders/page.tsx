@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   Package, Clock, Truck, CheckCircle2, XCircle,
-  AlertTriangle, ShoppingBag, ChevronRight,
+  AlertTriangle, ShoppingBag, ChevronRight, Trash2,
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -105,15 +105,33 @@ function formatRands(cents: number) {
 
 // ── Order card ────────────────────────────────────────────────────────────────
 
-function OrderCard({ order, userId, onClick }: { order: OrderRow; userId: string; onClick: () => void }) {
+function OrderCard({ order, userId, onClick, onCancelled }: { order: OrderRow; userId: string; onClick: () => void; onCancelled: (id: string) => void }) {
   const isSeller = order.seller_id === userId;
   const cfg = getStatusConfig(order.status, isSeller);
   const cover = order.listings?.images?.[0] ?? null;
   const title = order.listings?.title ?? 'Item no longer available';
   const shortId = order.id.slice(0, 8).toUpperCase();
   const isDelivered = order.status === 'DELIVERED';
+  const canCancel = !isSeller && order.status === 'PENDING_PAYMENT';
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  async function handleCancel(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirmCancel) { setConfirmCancel(true); return; }
+    setCancelling(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const res = await fetch(`/api/orders/${order.id}/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (res.ok) onCancelled(order.id);
+    else setCancelling(false);
+  }
 
   return (
+    <div className="relative">
     <button
       onClick={onClick}
       className="w-full text-left bg-white border border-[#dedede] rounded-2xl p-4 hover:border-[#BE1E2D] hover:shadow-sm transition group"
@@ -184,6 +202,39 @@ function OrderCard({ order, userId, onClick }: { order: OrderRow; userId: string
         </div>
       </div>
     </button>
+
+    {/* Cancel button — only for unpaid buyer orders */}
+    {canCancel && (
+      <div className="flex items-center justify-end gap-2 px-4 pb-3 -mt-1">
+        {confirmCancel ? (
+          <>
+            <span className="text-xs text-[#979797]">Cancel this order?</span>
+            <button
+              onClick={e => { e.stopPropagation(); setConfirmCancel(false); }}
+              className="text-xs text-[#979797] hover:text-[#111] px-3 py-1 rounded-full border border-[#dedede] transition"
+            >
+              Keep
+            </button>
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="text-xs text-white bg-red-500 hover:bg-red-600 disabled:bg-[#dedede] px-3 py-1 rounded-full transition"
+            >
+              {cancelling ? 'Cancelling…' : 'Yes, cancel'}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={handleCancel}
+            className="flex items-center gap-1 text-xs text-[#979797] hover:text-red-500 transition"
+          >
+            <Trash2 size={12} strokeWidth={2} />
+            Cancel order
+          </button>
+        )}
+      </div>
+    )}
+    </div>
   );
 }
 
@@ -314,6 +365,7 @@ export default function OrdersPage() {
                 order={order}
                 userId={userId}
                 onClick={() => router.push(`/orders/${order.id}`)}
+                onCancelled={id => setOrders(prev => prev.filter(o => o.id !== id))}
               />
             ))}
           </div>

@@ -261,6 +261,7 @@ export default function OrdersPage() {
           listings ( title, images )
         `)
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+        .not('status', 'in', '("CANCELLED","AUTO_CANCELLED")')
         .order('created_at', { ascending: false });
 
       setOrders((data ?? []) as unknown as OrderRow[]);

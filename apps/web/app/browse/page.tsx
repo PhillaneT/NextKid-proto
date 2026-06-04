@@ -210,12 +210,12 @@ export default function BrowsePage() {
         </div>
 
         {/* Category pills */}
-        <div className="flex gap-2 mb-8 overflow-x-auto pb-1 scrollbar-hide">
-          {(['All', ...ALL_CATEGORIES] as Array<ListingCategory | 'All'>).map(cat => (
+        <div className="flex gap-1.5 mb-8 flex-wrap">
+          {(['All', ...ALL_CATEGORIES.filter(c => c !== 'Other')] as Array<ListingCategory | 'All'>).map(cat => (
             <button
               key={cat}
               onClick={() => setCategory(cat)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition shrink-0 ${
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition shrink-0 ${
                 category === cat
                   ? 'bg-[#BE1E2D] text-white'
                   : 'bg-[#f4f4f4] text-[#111] hover:bg-[#fde8ea] hover:text-[#BE1E2D]'

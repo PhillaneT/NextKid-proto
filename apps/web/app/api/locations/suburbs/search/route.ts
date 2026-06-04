@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   let query = supabase
     .from('suburbs')
     .select('id, name, city_id, city_name, province_code, postal_code')
-    .ilike('name', `${q}%`)
+    .ilike('name', `%${q}%`)
     .order('name')
     .limit(15)
 

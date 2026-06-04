@@ -131,10 +131,9 @@ function OrderCard({ order, userId, onClick, onCancelled }: { order: OrderRow; u
   }
 
   return (
-    <div className="relative">
-    <button
+    <div
       onClick={onClick}
-      className="w-full text-left bg-white border border-[#dedede] rounded-2xl p-4 hover:border-[#BE1E2D] hover:shadow-sm transition group"
+      className="w-full text-left bg-white border border-[#dedede] rounded-2xl p-4 hover:border-[#BE1E2D] hover:shadow-sm transition group cursor-pointer"
     >
       <div className="flex gap-4 items-start">
 
@@ -165,13 +164,45 @@ function OrderCard({ order, userId, onClick, onCancelled }: { order: OrderRow; u
             <span className="text-xs font-medium text-[#979797]">{isSeller ? 'Selling' : 'Buying'}</span>
           </div>
 
-          {/* Bottom row: price + status */}
-          <div className="flex items-center justify-between mt-2.5 gap-3">
+          {/* Bottom row: price + status + cancel */}
+          <div className="flex items-center justify-between mt-2.5 gap-3 flex-wrap">
             <span className="text-sm font-bold text-[#111]">{formatRands(order.total_paid_cents)}</span>
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${cfg.colour} ${cfg.bg} ${cfg.border}`}>
-              {cfg.icon}
-              {cfg.label}
-            </span>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${cfg.colour} ${cfg.bg} ${cfg.border}`}>
+                {cfg.icon}
+                {cfg.label}
+              </span>
+
+              {/* Cancel — inside the card, next to status badge */}
+              {canCancel && (
+                confirmCancel ? (
+                  <>
+                    <span className="text-xs text-[#979797]">Sure?</span>
+                    <button
+                      onClick={e => { e.stopPropagation(); setConfirmCancel(false); }}
+                      className="text-xs text-[#979797] hover:text-[#111] px-2.5 py-1 rounded-full border border-[#dedede] transition"
+                    >
+                      Keep
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      disabled={cancelling}
+                      className="text-xs text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 px-2.5 py-1 rounded-full transition"
+                    >
+                      {cancelling ? '…' : 'Yes, cancel'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleCancel}
+                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 transition"
+                  >
+                    <Trash2 size={12} strokeWidth={2} className="text-red-500" />
+                    Cancel
+                  </button>
+                )
+              )}
+            </div>
           </div>
 
           {/* Hub action banners */}
@@ -201,39 +232,6 @@ function OrderCard({ order, userId, onClick, onCancelled }: { order: OrderRow; u
           )}
         </div>
       </div>
-    </button>
-
-    {/* Cancel button — only for unpaid buyer orders */}
-    {canCancel && (
-      <div className="flex items-center justify-end gap-2 px-4 pb-3 -mt-1">
-        {confirmCancel ? (
-          <>
-            <span className="text-xs text-[#979797]">Cancel this order?</span>
-            <button
-              onClick={e => { e.stopPropagation(); setConfirmCancel(false); }}
-              className="text-xs text-[#979797] hover:text-[#111] px-3 py-1 rounded-full border border-[#dedede] transition"
-            >
-              Keep
-            </button>
-            <button
-              onClick={handleCancel}
-              disabled={cancelling}
-              className="text-xs text-white bg-red-500 hover:bg-red-600 disabled:bg-[#dedede] px-3 py-1 rounded-full transition"
-            >
-              {cancelling ? 'Cancelling…' : 'Yes, cancel'}
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={handleCancel}
-            className="flex items-center gap-1 text-xs text-[#979797] hover:text-red-500 transition"
-          >
-            <Trash2 size={12} strokeWidth={2} />
-            Cancel order
-          </button>
-        )}
-      </div>
-    )}
     </div>
   );
 }

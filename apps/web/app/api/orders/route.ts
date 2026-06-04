@@ -63,7 +63,23 @@ export async function POST(req: NextRequest) {
 
   const serverClient = createServerSupabaseClient()
 
-  // 3. Re-fetch listing to validate it is still available
+  // 3a. Guard against duplicate active orders for the same listing
+  const { data: existingOrder } = await serverClient
+    .from('orders')
+    .select('id')
+    .eq('buyer_id', buyerId)
+    .eq('listing_id', listingId)
+    .not('status', 'in', '("CANCELLED","COMPLETED","REFUNDED")')
+    .maybeSingle()
+
+  if (existingOrder) {
+    return NextResponse.json(
+      { error: 'duplicate_order', orderId: existingOrder.id },
+      { status: 409 }
+    )
+  }
+
+  // 3b. Re-fetch listing to validate it is still available
   // RULE: Always re-validate at order creation — state may have changed since quote was fetched
   const { data: listing, error: listingError } = await serverClient
     .from('listings')

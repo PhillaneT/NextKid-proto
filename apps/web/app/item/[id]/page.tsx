@@ -77,6 +77,7 @@ export default function ItemPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [wishlisted, setWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [sellerProvince, setSellerProvince] = useState<string | null>(null);
   const [sellerSoldCount, setSellerSoldCount] = useState(0);
   const [viewSchoolName, setViewSchoolName] = useState<string | null>(null);
@@ -245,17 +246,25 @@ export default function ItemPage() {
       const owner = user.id === data.seller_id;
       setIsOwner(owner);
       if (!owner) {
-        // Check if already wishlisted
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          const res = await fetch('/api/wishlist', {
-            headers: { Authorization: `Bearer ${session.access_token}` },
-          });
-          if (res.ok) {
-            const json = await res.json();
+          // Check if already wishlisted
+          const [wishlistRes, { data: existingOrder }] = await Promise.all([
+            fetch('/api/wishlist', { headers: { Authorization: `Bearer ${session.access_token}` } }),
+            supabase
+              .from('orders')
+              .select('id')
+              .eq('buyer_id', user.id)
+              .eq('listing_id', data.id)
+              .not('status', 'in', '("CANCELLED","COMPLETED","REFUNDED")')
+              .maybeSingle(),
+          ]);
+          if (wishlistRes.ok) {
+            const json = await wishlistRes.json();
             const ids = (json.items ?? []).map((i: { listing_id: string }) => i.listing_id);
             setWishlisted(ids.includes(data.id));
           }
+          if (existingOrder) setActiveOrderId(existingOrder.id);
         }
       }
     } else {
@@ -863,8 +872,24 @@ export default function ItemPage() {
                       </div>
                     )}
 
+                    {/* Already-ordered guard — show banner and skip all buy/cart buttons */}
+                    {activeOrderId && (
+                      <div className="bg-green-50 border border-green-200 rounded-2xl p-5 flex flex-col gap-3">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={18} strokeWidth={2} className="text-green-600 shrink-0" />
+                          <p className="text-sm font-semibold text-green-800">You already have an active order for this item.</p>
+                        </div>
+                        <button
+                          onClick={() => router.push(`/orders/${activeOrderId}`)}
+                          className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-full transition text-sm"
+                        >
+                          View your order
+                        </button>
+                      </div>
+                    )}
+
                     {/* Multi-item selector — shown FIRST so buyer sees it immediately */}
-                    {isLoggedIn && item.is_multi_item && listingItems.length > 0 && (
+                    {isLoggedIn && !activeOrderId && item.is_multi_item && listingItems.length > 0 && (
                       <div className="bg-[#fff9f9] border-2 border-[#BE1E2D]/30 rounded-2xl p-4 space-y-3">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 size={16} strokeWidth={2} className="text-[#BE1E2D]" />
@@ -920,7 +945,7 @@ export default function ItemPage() {
                       <div className="w-full py-4 text-center text-[#979797] text-sm bg-[#f4f4f4] rounded-full">All items sold</div>
                     )}
 
-                    {isLoggedIn && !item.is_multi_item && (
+                    {isLoggedIn && !item.is_multi_item && !activeOrderId && (
                       <button onClick={handleBuyNow}
                         className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] text-white font-semibold rounded-full transition">
                         ⚡ Buy Now — R{(item.price_cents / 100).toLocaleString()}

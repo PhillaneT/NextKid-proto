@@ -51,11 +51,14 @@ function CartCheckoutInner() {
       if (res.ok && json.orderId) {
         createdIds.push(json.orderId)
         remove(item.listingId)
-        // Remove from wishlist — fire-and-forget, don't block on failure
         fetch(`/api/wishlist/${item.listingId}`, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${session.access_token}` },
         }).catch(() => {})
+      } else if (res.status === 409 && json.error === 'duplicate_order' && json.orderId) {
+        // Already have an active order — treat it as success so it doesn't block checkout
+        createdIds.push(json.orderId)
+        remove(item.listingId)
       } else {
         setError(`Could not order "${item.title}": ${json.error ?? 'unknown error'}`)
         break

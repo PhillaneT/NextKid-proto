@@ -86,6 +86,7 @@ export default function ProfileScreen() {
   const [editSuburbName, setEditSuburbName] = useState('');
   const [cities, setCities] = useState<{ id: string; name: string }[]>([]);
   const [suburbs, setSuburbs] = useState<{ id: string; name: string }[]>([]);
+  const [suburbSearch, setSuburbSearch] = useState('');
   const [loadingCities, setLoadingCities] = useState(false);
   const [loadingSuburbs, setLoadingSuburbs] = useState(false);
   const [expandedPanel, setExpandedPanel] = useState<'city' | 'suburb' | null>(null);
@@ -392,7 +393,7 @@ export default function ProfileScreen() {
               <Text style={styles.editLabel}>Suburb</Text>
               <TouchableOpacity
                 style={[styles.locPickerBtn, editSuburbId && styles.locPickerBtnSelected]}
-                onPress={() => setExpandedPanel(expandedPanel === 'suburb' ? null : 'suburb')}
+                onPress={() => { setExpandedPanel(expandedPanel === 'suburb' ? null : 'suburb'); setSuburbSearch(''); }}
               >
                 <Text style={[styles.locPickerText, editSuburbId && styles.locPickerTextSelected]}>
                   {loadingSuburbs ? 'Loading...' : editSuburbId ? editSuburbName : 'Select a suburb...'}
@@ -401,16 +402,39 @@ export default function ProfileScreen() {
               </TouchableOpacity>
               {expandedPanel === 'suburb' && (
                 <View style={styles.locDropList}>
-                  {suburbs.map(s => (
-                    <TouchableOpacity
-                      key={s.id}
-                      style={[styles.locDropRow, editSuburbId === s.id && styles.locDropRowActive]}
-                      onPress={() => { setEditSuburbId(s.id); setEditSuburbName(s.name); setExpandedPanel(null); }}
-                    >
-                      <Text style={[styles.locDropText, editSuburbId === s.id && styles.locDropTextActive]}>{s.name}</Text>
-                      {editSuburbId === s.id && <Text style={{ color: BLUE }}>✓</Text>}
-                    </TouchableOpacity>
-                  ))}
+                  <TextInput
+                    style={{ margin: 8, padding: 8, backgroundColor: '#f4f4f4', borderRadius: 10, fontSize: 13, color: '#111' }}
+                    value={suburbSearch}
+                    onChangeText={setSuburbSearch}
+                    placeholder="Search suburb..."
+                    placeholderTextColor="#979797"
+                    autoFocus
+                  />
+                  {(() => {
+                    const filtered = suburbSearch.trim()
+                      ? suburbs.filter(s => s.name.toLowerCase().includes(suburbSearch.toLowerCase()))
+                      : suburbs
+                    return filtered.length > 0 ? filtered.map(s => (
+                      <TouchableOpacity
+                        key={s.id}
+                        style={[styles.locDropRow, editSuburbId === s.id && styles.locDropRowActive]}
+                        onPress={() => { setEditSuburbId(s.id); setEditSuburbName(s.name); setExpandedPanel(null); setSuburbSearch(''); }}
+                      >
+                        <Text style={[styles.locDropText, editSuburbId === s.id && styles.locDropTextActive]}>{s.name}</Text>
+                        {editSuburbId === s.id && <Text style={{ color: BLUE }}>✓</Text>}
+                      </TouchableOpacity>
+                    )) : (
+                      <View style={{ padding: 12 }}>
+                        <Text style={{ color: '#979797', fontSize: 12 }}>"{suburbSearch}" not found</Text>
+                        <TouchableOpacity
+                          style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: BLUE, alignSelf: 'flex-start' }}
+                          onPress={() => { setEditSuburbId(`manual_${suburbSearch.toLowerCase().replace(/\s+/g,'_')}`); setEditSuburbName(suburbSearch.trim()); setExpandedPanel(null); setSuburbSearch(''); }}
+                        >
+                          <Text style={{ color: BLUE, fontSize: 12 }}>Use "{suburbSearch.trim()}"</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )
+                  })()}
                 </View>
               )}
             </>

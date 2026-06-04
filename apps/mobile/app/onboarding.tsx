@@ -43,6 +43,7 @@ export default function OnboardingScreen() {
   const [searchingSchools, setSearchingSchools] = useState(false);
   const [selectedSchool, setSelectedSchool] = useState<SchoolOption | null>(null);
 
+  const [suburbSearch, setSuburbSearch]     = useState('');
   const [loadingCities, setLoadingCities]   = useState(false);
   const [loadingSuburbs, setLoadingSuburbs] = useState(false);
   const [loadingSchools, setLoadingSchools] = useState(false);
@@ -310,7 +311,7 @@ export default function OnboardingScreen() {
             <>
               <Text style={[styles.label, { marginTop: 10 }]}>Suburb</Text>
               <TouchableOpacity style={[styles.pickerBtn, suburbId && styles.pickerBtnSelected]}
-                onPress={() => setExpandedPanel(expandedPanel === 'suburb' ? null : 'suburb')}>
+                onPress={() => { setExpandedPanel(expandedPanel === 'suburb' ? null : 'suburb'); setSuburbSearch(''); }}>
                 <Text style={[styles.pickerBtnText, suburbId && styles.pickerBtnTextSelected]}>
                   {loadingSuburbs ? 'Loading...' : suburbId ? suburbName : 'Select a suburb...'}
                 </Text>
@@ -318,13 +319,43 @@ export default function OnboardingScreen() {
               </TouchableOpacity>
               {expandedPanel === 'suburb' && (
                 <View style={styles.dropList}>
-                  {suburbs.map(s => (
-                    <TouchableOpacity key={s.id} style={[styles.dropRow, suburbId === s.id && styles.dropRowActive]}
-                      onPress={() => { setSuburbId(s.id); setSuburbName(s.name); setExpandedPanel(null); }}>
-                      <Text style={[styles.dropText, suburbId === s.id && styles.dropTextActive]}>{s.name}</Text>
-                      {suburbId === s.id && <Text style={{ color: BLUE }}>✓</Text>}
-                    </TouchableOpacity>
-                  ))}
+                  {/* Search within suburbs */}
+                  <TextInput
+                    style={[styles.input, { margin: 8, marginBottom: 4 }]}
+                    value={suburbSearch}
+                    onChangeText={setSuburbSearch}
+                    placeholder="Search suburb..."
+                    placeholderTextColor="#979797"
+                    autoFocus
+                  />
+                  {(() => {
+                    const filtered = suburbSearch.trim()
+                      ? suburbs.filter(s => s.name.toLowerCase().includes(suburbSearch.toLowerCase()))
+                      : suburbs
+                    return filtered.length > 0 ? (
+                      filtered.map(s => (
+                        <TouchableOpacity key={s.id} style={[styles.dropRow, suburbId === s.id && styles.dropRowActive]}
+                          onPress={() => { setSuburbId(s.id); setSuburbName(s.name); setExpandedPanel(null); setSuburbSearch(''); }}>
+                          <Text style={[styles.dropText, suburbId === s.id && styles.dropTextActive]}>{s.name}</Text>
+                          {suburbId === s.id && <Text style={{ color: BLUE }}>✓</Text>}
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={{ padding: 12 }}>
+                        <Text style={styles.emptyText}>"{suburbSearch}" not found</Text>
+                        <TouchableOpacity
+                          style={{ marginTop: 8, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, borderColor: BLUE, alignSelf: 'flex-start' }}
+                          onPress={() => {
+                            setSuburbId(`manual_${suburbSearch.toLowerCase().replace(/\s+/g,'_')}`);
+                            setSuburbName(suburbSearch.trim());
+                            setExpandedPanel(null);
+                            setSuburbSearch('');
+                          }}>
+                          <Text style={{ color: BLUE, fontSize: 12 }}>Use "{suburbSearch.trim()}"</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )
+                  })()}
                 </View>
               )}
             </>

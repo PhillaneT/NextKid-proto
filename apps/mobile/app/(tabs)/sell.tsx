@@ -58,6 +58,8 @@ export default function SellScreen() {
   // Step 1
   const [category, setCategory] = useState<ListingCategory | ''>('');
   const isSchoolSpecific = SCHOOL_SPECIFIC_CATEGORIES.includes(category as typeof SCHOOL_SPECIFIC_CATEGORIES[number]);
+  const isOptionalSchool = isSchoolSpecific || category === 'Books & Stationery';
+  const showsSchoolStep  = isOptionalSchool;
 
   // Step 2
   const [province, setProvince]           = useState('');
@@ -138,8 +140,8 @@ export default function SellScreen() {
 
   const nextStep = () => {
     if (step === 1 && !category) return;
-    if (step === 1 && isSchoolSpecific) {
-      if (profileSchools.length === 1) { setSelectedSchool(profileSchools[0]); setStep(3); return; }
+    if (step === 1 && showsSchoolStep) {
+      if (isSchoolSpecific && profileSchools.length === 1) { setSelectedSchool(profileSchools[0]); setStep(3); return; }
       setStep(2); return;
     }
     if (step === 1) { setStep(3); return; }
@@ -147,8 +149,8 @@ export default function SellScreen() {
   };
 
   const prevStep = () => {
-    if (step === 3 && !isSchoolSpecific) { setStep(1); return; }
-    if (step === 3 && isSchoolSpecific && profileSchools.length === 1) { setStep(1); return; }
+    if (step === 3 && !showsSchoolStep) { setStep(1); return; }
+    if (step === 3 && showsSchoolStep && isSchoolSpecific && profileSchools.length === 1) { setStep(1); return; }
     if (step > 1) setStep((step - 1) as Step);
   };
 
@@ -177,13 +179,16 @@ export default function SellScreen() {
       .select('province, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
       .eq('id', user.id).single();
 
-    // RULE: condition stored uppercase to match DB check constraint
-    // RULE: price stored in cents — Stitch processes ZAR in cents natively
+    const sellerPayoutRands = isMultiItem
+      ? Math.min(...validItems.map(i => parseFloat(i.price)))
+      : parseFloat(price);
+    const buyerPriceCents = calculateBuyerPrice(sellerPayoutRands).buyerPriceCents;
+
     const { data: newListing, error } = await supabase.from('listings').insert({
       seller_id:            user.id,
       title:                title.trim(),
       description:          description.trim() || null,
-      price_cents:          priceCents,
+      price_cents:          buyerPriceCents,
       condition:            condition.toUpperCase(),
       category,
       subcategory:          subcategory || null,
@@ -241,8 +246,8 @@ export default function SellScreen() {
     setSuccess(false);
   };
 
-  const TOTAL_STEPS = isSchoolSpecific ? 5 : 4;
-  const displayStep      = step === 1 ? 1 : step === 2 ? 2 : isSchoolSpecific ? step : step - 1;
+  const TOTAL_STEPS = showsSchoolStep ? 5 : 4;
+  const displayStep = step === 1 ? 1 : step === 2 ? 2 : showsSchoolStep ? step : step - 1;
 
   if (success) return (
     <SafeAreaView style={styles.container}>
@@ -281,8 +286,8 @@ export default function SellScreen() {
                   <CategoryIcon name={cat} color={category === cat ? BLUE : '#979797'} />
                 </View>
                 <Text style={[styles.categoryName, category === cat && styles.categoryNameActive]}>{cat}</Text>
-                {SCHOOL_SPECIFIC_CATEGORIES.includes(cat as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) && (
-                  <Text style={styles.schoolTag}>School-specific</Text>
+                {(SCHOOL_SPECIFIC_CATEGORIES.includes(cat as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) || cat === 'Books & Stationery') && (
+                  <Text style={styles.schoolTag}>Can link to school</Text>
                 )}
               </TouchableOpacity>
             ))}
@@ -293,13 +298,9 @@ export default function SellScreen() {
         </>}
 
         {/* ── Step 2 — School picker ─────────────────────────── */}
-        {step === 2 && isSchoolSpecific && <>
-          <Text style={styles.stepTitle}>Which school?</Text>
-          <Text style={styles.stepSub}>
-            {profileSchools.length > 0
-              ? 'Select which of your schools this item belongs to.'
-              : 'Link this listing to a school so the right buyers find it.'}
-          </Text>
+        {step === 2 && showsSchoolStep && <>
+          <Text style={styles.stepTitle}>Link to a school? (optional)</Text>
+          <Text style={styles.stepSub}>Linking your item to a school helps the right buyers find it. You can skip this if it's not school-specific.</Text>
 
           {profileSchools.length > 0 ? (
             <View style={{ gap: 10, marginBottom: 12 }}>
@@ -367,7 +368,11 @@ export default function SellScreen() {
             <TouchableOpacity style={[styles.btn, styles.btnOutline, { flex: 1 }]} onPress={prevStep}>
               <Text style={styles.btnOutlineText}>← Back</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, !selectedSchool && styles.btnDisabled, { flex: 2 }]} onPress={nextStep} disabled={!selectedSchool}>
+            <TouchableOpacity style={[styles.btn, styles.btnOutline, { flex: 1 }]}
+              onPress={() => { setSelectedSchool(null); setStep(3); }}>
+              <Text style={styles.btnOutlineText}>Skip</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.btn, { flex: 2 }]} onPress={nextStep}>
               <Text style={styles.btnText}>Continue →</Text>
             </TouchableOpacity>
           </View>

@@ -348,19 +348,19 @@ export default function NewListingPage() {
             <div>
               <h2 className="text-[#111] font-semibold text-lg mb-1">What are you selling?</h2>
               <p className="text-[#979797] text-sm mb-6">Choose the category that best fits your item.</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {ALL_CATEGORIES.map(cat => (
                   <button key={cat} type="button" onClick={() => setCategory(cat)}
-                    className={`p-4 rounded-xl border-2 text-left transition flex items-start gap-3 ${
+                    className={`p-3 rounded-xl border-2 text-left transition flex items-center gap-3 ${
                       category === cat ? 'border-[#BE1E2D] bg-[#fde8ea]' : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
                     }`}>
-                    <span className={`mt-0.5 ${category === cat ? 'text-[#BE1E2D]' : 'text-[#979797]'}`}>
-                      {CATEGORY_ICON[cat] ?? <Package size={22} strokeWidth={2} />}
+                    <span className={`shrink-0 ${category === cat ? 'text-[#BE1E2D]' : 'text-[#979797]'}`}>
+                      {CATEGORY_ICON[cat] ?? <Package size={20} strokeWidth={2} />}
                     </span>
-                    <div>
-                      <span className="text-[#111] text-sm font-medium block">{cat}</span>
+                    <div className="min-w-0">
+                      <span className="text-[#111] text-sm font-medium block truncate">{cat}</span>
                       {SCHOOL_SPECIFIC_CATEGORIES.includes(cat as typeof SCHOOL_SPECIFIC_CATEGORIES[number]) && (
-                        <span className="text-[#BE1E2D] text-xs block mt-0.5">School-specific</span>
+                        <span className="text-[#BE1E2D] text-xs block">School-specific</span>
                       )}
                     </div>
                   </button>

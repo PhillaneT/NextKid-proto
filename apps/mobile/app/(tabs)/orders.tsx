@@ -1,13 +1,14 @@
 import { useCallback, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Image,
-  StyleSheet, ActivityIndicator,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/src/lib/supabase';
+import { WEB_API_BASE } from '@/src/lib/api';
 import {
-  Package, ShoppingBag, CheckCircle2, ChevronRight, QrCode,
+  Package, ShoppingBag, CheckCircle2, ChevronRight, QrCode, Trash2,
 } from 'lucide-react-native';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -82,16 +83,45 @@ function OrderCard({
   order,
   userId,
   onPress,
+  onCancelled,
 }: {
-  order:   OrderRow;
-  userId:  string;
-  onPress: () => void;
+  order:       OrderRow;
+  userId:      string;
+  onPress:     () => void;
+  onCancelled: (id: string) => void;
 }) {
-  const isSeller = order.seller_id === userId;
-  const cfg      = getStatus(order.status, isSeller);
-  const cover    = order.listings?.images?.[0] ?? null;
-  const title    = order.listings?.title ?? 'Item no longer available';
-  const shortId  = order.id.slice(0, 8).toUpperCase();
+  const isSeller  = order.seller_id === userId;
+  const cfg       = getStatus(order.status, isSeller);
+  const cover     = order.listings?.images?.[0] ?? null;
+  const title     = order.listings?.title ?? 'Item no longer available';
+  const shortId   = order.id.slice(0, 8).toUpperCase();
+  const canCancel = !isSeller && order.status === 'PENDING_PAYMENT';
+  const [cancelling, setCancelling] = useState(false);
+
+  function handleCancel() {
+    Alert.alert(
+      'Cancel order?',
+      'This cannot be undone.',
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Yes, cancel',
+          style: 'destructive',
+          onPress: async () => {
+            setCancelling(true);
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) { setCancelling(false); return; }
+            const res = await fetch(`${WEB_API_BASE}/api/orders/${order.id}/cancel`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            if (res.ok) onCancelled(order.id);
+            else setCancelling(false);
+          },
+        },
+      ]
+    );
+  }
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.8}>
@@ -119,14 +149,30 @@ function OrderCard({
             <Text style={styles.metaText}>{isSeller ? 'Selling' : 'Buying'}</Text>
           </View>
 
+          {/* Price + status + cancel on same row */}
           <View style={styles.cardBottom}>
             <Text style={styles.cardPrice}>{fmtRands(order.total_paid_cents)}</Text>
-            <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
-              <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+            <View style={styles.cardBottomRight}>
+              <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
+                <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+              </View>
+              {canCancel && (
+                <TouchableOpacity
+                  onPress={e => { e.stopPropagation?.(); handleCancel(); }}
+                  disabled={cancelling}
+                  style={styles.cancelBtn}
+                  hitSlop={8}
+                >
+                  {cancelling
+                    ? <ActivityIndicator size={12} color="#ef4444" />
+                    : <Trash2 size={14} strokeWidth={2} color="#ef4444" />
+                  }
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
-          {/* Action banners for states requiring user action */}
+          {/* Action banners */}
           {order.status === 'AWAITING_DROPOFF' && isSeller && (
             <View style={styles.actionBanner}>
               <Package size={11} strokeWidth={2} color="#92400e" />
@@ -168,11 +214,11 @@ export default function OrdersScreen() {
       if (!user) { router.replace('/' as never); return; }
       setUserId(user.id);
 
-      // Fetch both buyer AND seller orders so sellers see their drop-off tasks
       const { data } = await supabase
         .from('orders')
         .select('id, status, buyer_id, seller_id, item_price_cents, total_paid_cents, shipping_method, created_at, waybill_number, listings(title, images)')
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+        .not('status', 'in', '("CANCELLED","AUTO_CANCELLED")')
         .order('created_at', { ascending: false });
 
       if (active) { setOrders((data ?? []) as unknown as OrderRow[]); setLoading(false); }
@@ -229,6 +275,7 @@ export default function OrdersScreen() {
             order={item}
             userId={userId}
             onPress={() => router.push(`/order/${item.id}` as never)}
+            onCancelled={id => setOrders(prev => prev.filter(o => o.id !== id))}
           />
         )}
         ListEmptyComponent={
@@ -281,10 +328,12 @@ const styles = StyleSheet.create({
   cardMeta:  { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 3, marginBottom: 8 },
   metaText:  { color: '#979797', fontSize: 11 },
   metaDot:   { color: '#979797', fontSize: 11 },
-  cardBottom:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  cardPrice:   { color: '#111', fontSize: 14, fontWeight: '700' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, maxWidth: '65%' },
-  statusText:  { fontSize: 10, fontWeight: '700' },
+  cardBottom:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  cardBottomRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cardPrice:       { color: '#111', fontSize: 14, fontWeight: '700' },
+  statusBadge:     { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, maxWidth: 160 },
+  statusText:      { fontSize: 10, fontWeight: '700' },
+  cancelBtn:       { padding: 4 },
 
   actionBanner:      { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: '#fffbeb', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#fde68a' },
   actionBannerGreen: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' },

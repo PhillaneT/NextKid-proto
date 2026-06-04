@@ -6,7 +6,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { Pencil, Trash2, X, Check, Heart, MapPin, ShoppingBag, School as SchoolIcon, Truck, Box, CheckCircle2, ShoppingCart } from 'lucide-react';
 import { useCart } from '@/lib/cart';
 import type { SelectedListingItem } from '@/lib/cart';
-import { ALL_CATEGORIES, SUBCATEGORIES, LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES, SCHOOL_SPECIFIC_CATEGORIES, getLockerSizeForParcel, canFitInLocker } from '@nextkid/shared';
+import { ALL_CATEGORIES, SUBCATEGORIES, LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, GRADES, SA_PROVINCES, SCHOOL_SPECIFIC_CATEGORIES, getLockerSizeForParcel, canFitInLocker, calculateBuyerPrice } from '@nextkid/shared';
 import type { ListingCategory, School, SellerShippingOption, ParcelDimensions } from '@nextkid/shared';
 import LockerMapPicker from '../../components/LockerMapPicker';
 import type { SelectedLocker } from '../../components/LockerMapPicker';
@@ -301,7 +301,7 @@ export default function ItemPage() {
   async function handleSave() {
     setSaving(true);
     const oldPriceCents = item!.price_cents;
-    const newPriceCents = parseInt(editForm.price) * 100 || 0;
+    const newPriceCents = calculateBuyerPrice(parseFloat(editForm.price) || 0).buyerPriceCents;
 
     const { error } = await supabase.from('listings').update({
       title: editForm.title, category: editForm.category, subcategory: editForm.subcategory || null,

@@ -214,11 +214,12 @@ export default function NewListingPage() {
       .select('province, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
       .eq('id', user.id).single();
 
-    // RULE: condition stored uppercase to match DB check constraint
-    // For multi-item listings price_cents = minimum item price (used for "from R X" display)
-    const priceCents = isMultiItem
-      ? Math.round(Math.min(...validItems.map(i => parseFloat(i.price))) * 100)
-      : Math.round(parseFloat(form.price) * 100);
+    // price_cents stores the BUYER price (gross-up) so listing cards show what the buyer pays.
+    // For multi-item listings, use the gross-up of the cheapest item as the "from R X" price.
+    const sellerPayoutRands = isMultiItem
+      ? Math.min(...validItems.map(i => parseFloat(i.price)))
+      : parseFloat(form.price);
+    const priceCents = calculateBuyerPrice(sellerPayoutRands).buyerPriceCents;
 
     const { data: newListing, error: insertError } = await supabase.from('listings').insert({
       seller_id:            user.id,

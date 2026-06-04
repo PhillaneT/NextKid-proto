@@ -10,22 +10,22 @@ import {
 
 // POST /api/webhooks/stitch
 //
-// Receives payment status events from Stitch.
-// This is the authoritative trigger for order state advances after payment.
-//
+// Receives payment events from Stitch Express (delivered via Svix).
 // Handled event types:
-//   payment_initiation_request.complete  → AWAITING_DROPOFF (funds held)
-//   payment_initiation_request.failed    → CANCELLED
-//   payment_initiation_request.expired   → CANCELLED
+//   payment.paid     → AWAITING_DROPOFF (funds held)
+//   payment.failed   → CANCELLED
+//   payment.expired  → CANCELLED
 //
-// Security: HMAC-SHA256 signature verified via x-stitch-signature header.
-// Never advance order status without a valid signature.
+// Order is found by stitch_payment_id (the payment link ID we stored at checkout).
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text()
-  const sig     = req.headers.get('x-stitch-signature')
 
-  if (!verifyWebhookSignature(rawBody, sig)) {
+  const svixId        = req.headers.get('svix-id')
+  const svixTimestamp = req.headers.get('svix-timestamp')
+  const svixSignature = req.headers.get('svix-signature')
+
+  if (!verifyWebhookSignature(rawBody, { svixId, svixTimestamp, svixSignature })) {
     console.warn('[Stitch webhook] Invalid signature — rejected')
     return NextResponse.json({ error: 'invalid_signature' }, { status: 401 })
   }
@@ -37,24 +37,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
 
-  const server  = createServerSupabaseClient()
-  const orderId = event.data?.externalReference as string | undefined
+  const server = createServerSupabaseClient()
 
-  // ── Payment confirmed ─────────────────────────────────────────────────────
-  if (event.type === 'payment_initiation_request.complete') {
-    if (!orderId) {
-      console.error('[Stitch webhook] complete event missing externalReference')
-      return NextResponse.json({ error: 'missing_reference' }, { status: 400 })
-    }
+  // Find order by the payment link ID stored in orders.stitch_payment_id
+  const paymentLinkId = event.data?.id as string | undefined
 
-    const { data: order } = await server
+  async function findOrder() {
+    if (!paymentLinkId) return null
+    const { data } = await server
       .from('orders')
       .select('id, status, buyer_id')
-      .eq('id', orderId)
+      .eq('stitch_payment_id', paymentLinkId)
       .single()
+    return data
+  }
 
-    // Idempotency — skip if already advanced (webhook may fire more than once)
-    if (!order || order.status !== 'PENDING_PAYMENT') {
+  // ── payment.paid → advance to AWAITING_DROPOFF ────────────────────────────
+  if (event.type === 'payment.paid') {
+    const order = await findOrder()
+    if (!order) {
+      console.warn('[Stitch webhook] payment.paid: no order found for link', paymentLinkId)
+      return NextResponse.json({ ok: true, skipped: true })
+    }
+    if (order.status !== 'PENDING_PAYMENT') {
       return NextResponse.json({ ok: true, skipped: true })
     }
 
@@ -66,21 +71,20 @@ export async function POST(req: NextRequest) {
       payment_status:  'HELD',
       paid_at:         now.toISOString(),
       auto_dropoff_at: autoDropoffAt.toISOString(),
-    }).eq('id', orderId)
+    }).eq('id', order.id)
 
-    // ── Waybill + DROP-OFF QR ───────────────────────────────────────────────
     const waybillNumber = generateWaybillNumber()
-    const dropoffQr     = generateQrToken('DROPOFF', orderId, waybillNumber, DROPOFF_TTL_HOURS)
+    const dropoffQr     = generateQrToken('DROPOFF', order.id, waybillNumber, DROPOFF_TTL_HOURS)
 
     const { data: waybill } = await server
       .from('waybills')
-      .insert({ waybill_number: waybillNumber, order_id: orderId })
+      .insert({ waybill_number: waybillNumber, order_id: order.id })
       .select('id')
       .single()
 
     if (waybill) {
       await server.from('qr_tokens').insert({
-        order_id:   orderId,
+        order_id:   order.id,
         waybill_id: waybill.id,
         token_type: 'DROPOFF',
         token_raw:  dropoffQr.token,
@@ -89,17 +93,16 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // ── Order events (append-only audit log) ────────────────────────────────
     await server.from('order_events').insert([
       {
-        order_id:    orderId,
+        order_id:    order.id,
         from_status: 'PENDING_PAYMENT',
         to_status:   'PAYMENT_HELD',
-        note:        'Stitch payment confirmed — funds held in escrow',
+        note:        'Stitch Express payment confirmed — funds held',
         created_by:  order.buyer_id,
       },
       {
-        order_id:    orderId,
+        order_id:    order.id,
         from_status: 'PAYMENT_HELD',
         to_status:   'AWAITING_DROPOFF',
         note:        `Waybill ${waybillNumber} generated — seller notified to drop off`,
@@ -107,42 +110,26 @@ export async function POST(req: NextRequest) {
       },
     ])
 
-    // ── Notify buyer, seller, school admins (fire-and-forget) ───────────────
-    sendOrderNotification({ orderId, newStatus: 'AWAITING_DROPOFF', triggeredBy: 'buyer' })
+    sendOrderNotification({ orderId: order.id, newStatus: 'AWAITING_DROPOFF', triggeredBy: 'buyer' })
       .catch(err => console.error('[Stitch webhook] notification error:', err))
 
-    console.log(`[Stitch webhook] ✅ Order ${orderId.slice(0, 8)} → AWAITING_DROPOFF | ${waybillNumber}`)
+    console.log(`[Stitch webhook] ✅ Order ${order.id.slice(0, 8)} → AWAITING_DROPOFF | ${waybillNumber}`)
   }
 
-  // ── Payment failed or expired ─────────────────────────────────────────────
-  if (
-    event.type === 'payment_initiation_request.failed' ||
-    event.type === 'payment_initiation_request.expired'
-  ) {
-    if (orderId) {
-      const { data: order } = await server
-        .from('orders')
-        .select('id, status')
-        .eq('id', orderId)
-        .single()
-
-      if (order?.status === 'PENDING_PAYMENT') {
-        const reason = event.type === 'payment_initiation_request.failed' ? 'failed' : 'expired'
-
-        await server.from('orders')
-          .update({ status: 'CANCELLED' })
-          .eq('id', orderId)
-
-        await server.from('order_events').insert({
-          order_id:    orderId,
-          from_status: 'PENDING_PAYMENT',
-          to_status:   'CANCELLED',
-          note:        `Stitch payment ${reason} — order cancelled automatically`,
-          created_by:  null,
-        })
-
-        console.log(`[Stitch webhook] ❌ Order ${orderId.slice(0, 8)} → CANCELLED (${reason})`)
-      }
+  // ── payment.failed / payment.expired → CANCELLED ──────────────────────────
+  if (event.type === 'payment.failed' || event.type === 'payment.expired') {
+    const order = await findOrder()
+    if (order?.status === 'PENDING_PAYMENT') {
+      const reason = event.type === 'payment.failed' ? 'failed' : 'expired'
+      await server.from('orders').update({ status: 'CANCELLED' }).eq('id', order.id)
+      await server.from('order_events').insert({
+        order_id:    order.id,
+        from_status: 'PENDING_PAYMENT',
+        to_status:   'CANCELLED',
+        note:        `Stitch payment ${reason} — order cancelled automatically`,
+        created_by:  null,
+      })
+      console.log(`[Stitch webhook] ❌ Order ${order.id.slice(0, 8)} → CANCELLED (${reason})`)
     }
   }
 

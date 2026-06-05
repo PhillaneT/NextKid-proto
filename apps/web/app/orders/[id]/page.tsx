@@ -170,8 +170,31 @@ function QrPanel({
 // the buyer. Order stays PENDING_PAYMENT until the Stitch webhook confirms.
 
 function StitchPaymentPanel({ order }: { order: Order }) {
+  const router = useRouter();
   const [initiating, setInitiating] = useState(false);
+  const [simulating, setSimulating] = useState(false);
   const [error, setError]           = useState('');
+
+  const isTestEnv = typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname.includes('ngrok'));
+
+  async function handleSimulate() {
+    setSimulating(true);
+    setError('');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setSimulating(false); return; }
+    const res  = await fetch(`/api/orders/${order.id}/simulate-payment`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setError(json.error ?? 'Simulation failed');
+      setSimulating(false);
+      return;
+    }
+    router.refresh();
+  }
 
   async function handlePay() {
     setInitiating(true);
@@ -262,6 +285,22 @@ function StitchPaymentPanel({ order }: { order: Order }) {
           You will be redirected to Stitch to complete payment via instant EFT or card.
         </p>
       </div>
+
+      {/* Test mode only — simulate payment without real money */}
+      {isTestEnv && (
+        <div className="border-t border-dashed border-amber-300 pt-4 mt-2">
+          <p className="text-[10px] text-amber-600 font-semibold uppercase tracking-wide text-center mb-3">
+            🧪 Test mode — no real money
+          </p>
+          <button
+            onClick={handleSimulate}
+            disabled={simulating}
+            className="w-full py-3 bg-amber-400 hover:bg-amber-500 disabled:bg-[#dedede] text-white font-bold rounded-full transition text-sm"
+          >
+            {simulating ? 'Simulating…' : '🧪 Simulate payment (test)'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

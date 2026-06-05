@@ -50,6 +50,123 @@ type ListingItem = {
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
+const SA_BANKS = [
+  'ABSA', 'African Bank', 'Capitec', 'Discovery Bank', 'FNB',
+  'Investec', 'Nedbank', 'Standard Bank', 'TymeBank', 'Other',
+]
+
+function BankDetailsSection() {
+  const [form, setForm]       = useState({ accountHolderName: '', bankName: '', accountNumber: '', branchCode: '', accountType: 'cheque' })
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving]   = useState(false)
+  const [saved, setSaved]     = useState(false)
+  const [existing, setExisting] = useState<typeof form | null>(null)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return
+      fetch('/api/seller/bank-details', { headers: { Authorization: `Bearer ${session.access_token}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.bankDetails) {
+            const b = data.bankDetails
+            const f = { accountHolderName: b.account_holder_name, bankName: b.bank_name, accountNumber: b.account_number, branchCode: b.branch_code, accountType: b.account_type }
+            setExisting(f); setForm(f)
+          }
+        })
+    })
+  }, [])
+
+  async function handleSave() {
+    setSaving(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+    const res = await fetch('/api/seller/bank-details', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify(form),
+    })
+    if (res.ok) { setExisting(form); setEditing(false); setSaved(true); setTimeout(() => setSaved(false), 3000) }
+    setSaving(false)
+  }
+
+  return (
+    <div className="bg-[#f4f4f4] rounded-2xl p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-[#111]">💸 Payout bank details</h3>
+          <p className="text-xs text-[#979797] mt-0.5">Where we send your money when your items sell</p>
+        </div>
+        {existing && !editing && (
+          <button onClick={() => setEditing(true)} className="text-xs text-[#BE1E2D] hover:underline">Edit</button>
+        )}
+      </div>
+
+      {!editing && existing ? (
+        <div className="space-y-1 text-sm">
+          <p className="text-[#111] font-medium">{existing.accountHolderName}</p>
+          <p className="text-[#979797]">{existing.bankName} · {existing.accountType}</p>
+          <p className="text-[#979797]">Account: ****{existing.accountNumber.slice(-4)} · Branch: {existing.branchCode}</p>
+          <p className="text-xs text-amber-600 mt-1">⏳ Pending verification by NextKid team</p>
+          {saved && <p className="text-xs text-green-600">✓ Saved successfully</p>}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-[#111] mb-1">Account holder name</label>
+            <input value={form.accountHolderName} onChange={e => setForm({...form, accountHolderName: e.target.value})}
+              placeholder="Full name as on bank account"
+              className="w-full bg-white border border-[#dedede] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#BE1E2D]" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[#111] mb-1">Bank</label>
+              <select value={form.bankName} onChange={e => setForm({...form, bankName: e.target.value})}
+                className="w-full bg-white border border-[#dedede] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#BE1E2D]">
+                <option value="">Select bank...</option>
+                {SA_BANKS.map(b => <option key={b}>{b}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#111] mb-1">Account type</label>
+              <select value={form.accountType} onChange={e => setForm({...form, accountType: e.target.value})}
+                className="w-full bg-white border border-[#dedede] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#BE1E2D]">
+                <option value="cheque">Cheque / Current</option>
+                <option value="savings">Savings</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[#111] mb-1">Account number</label>
+              <input value={form.accountNumber} onChange={e => setForm({...form, accountNumber: e.target.value})}
+                placeholder="e.g. 6200123456"
+                className="w-full bg-white border border-[#dedede] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#BE1E2D]" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#111] mb-1">Branch code</label>
+              <input value={form.branchCode} onChange={e => setForm({...form, branchCode: e.target.value})}
+                placeholder="e.g. 632005"
+                className="w-full bg-white border border-[#dedede] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#BE1E2D]" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {editing && (
+              <button onClick={() => { setEditing(false); setForm(existing!) }}
+                className="flex-1 py-2.5 border border-[#dedede] rounded-full text-sm text-[#979797]">Cancel</button>
+            )}
+            <button onClick={handleSave}
+              disabled={saving || !form.accountHolderName || !form.bankName || !form.accountNumber || !form.branchCode}
+              className="flex-1 py-2.5 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white rounded-full text-sm font-semibold transition">
+              {saving ? 'Saving…' : 'Save bank details'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StatusBadge({ status }: { status: string }) {
   const s = status.toUpperCase();
   if (s === 'ACTIVE') return (
@@ -986,6 +1103,9 @@ export default function ProfilePage() {
           )}
         </div>
         </div>)}
+
+        {/* ── Bank details for seller payouts ─────────────────────────────── */}
+        <BankDetailsSection />
 
         {/* ── Delete account ───────────────────────────────────────────────── */}
         <div className="border-t border-[#dedede] pt-6">

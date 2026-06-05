@@ -270,6 +270,23 @@ export async function POST(req: NextRequest) {
       seller_payout_cents:       sellerPayout,
     }).eq('id', order.id)
 
+    // Add seller to payout queue — snapshot bank details at time of payout creation
+    const { data: bankDetails } = await server
+      .from('seller_bank_details')
+      .select('bank_name, account_number, branch_code, account_holder_name, account_type, verified')
+      .eq('seller_id', order.seller_id)
+      .single()
+
+    const hasBank = bankDetails?.verified === true
+    await server.from('seller_payouts').upsert({
+      order_id:      order.id,
+      seller_id:     order.seller_id,
+      amount_cents:  sellerPayout,
+      status:        hasBank ? 'pending' : 'held',
+      held_reason:   hasBank ? null : 'no_verified_bank_details',
+      bank_snapshot: bankDetails ?? null,
+    }, { onConflict: 'order_id', ignoreDuplicates: true })
+
     await server.from('order_events').insert({
       order_id: order.id, from_status: 'ITEM_AT_HUB', to_status: 'COMPLETED',
       note: 'Collection QR scanned by Klerebank admin — buyer collected item, funds released to seller',

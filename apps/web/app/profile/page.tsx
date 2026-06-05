@@ -1111,7 +1111,7 @@ export default function ProfilePage() {
         <div className="border-t border-[#dedede] pt-6">
           <button
             onClick={() => setShowDeleteModal(true)}
-            className="flex items-center gap-2 text-sm text-[#979797] hover:text-red-500 transition"
+            className="flex items-center gap-2 text-sm text-red-500 hover:text-red-700 transition"
           >
             <Trash2 size={14} strokeWidth={2} />
             Delete my account

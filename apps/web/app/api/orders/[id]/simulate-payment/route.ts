@@ -11,8 +11,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
-  const isTestEnv = appUrl.includes('localhost') || appUrl.includes('ngrok') || appUrl.includes('ngrok-free')
+  const host = req.headers.get('host') ?? ''
+  const isTestEnv = host.includes('localhost') || host.includes('ngrok') || process.env.NODE_ENV !== 'production'
   if (!isTestEnv) {
     return NextResponse.json({ error: 'not_available_in_production' }, { status: 403 })
   }

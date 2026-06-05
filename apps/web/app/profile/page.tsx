@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   MapPin, School, CheckCircle2, Package,
   Tag, Clock, ShoppingBag, Pencil, X, Check, Home, Search, LocateFixed,
-  Baby,
+  Baby, Trash2, AlertTriangle,
 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -414,6 +414,40 @@ export default function ProfilePage() {
 
   const signOut = async () => { await supabase.auth.signOut(); router.push('/'); };
 
+  const DELETION_REASONS = [
+    'No longer need the app',
+    'Found what I was looking for',
+    'Privacy concerns',
+    'Too many notifications',
+    'App not working properly',
+    'Other',
+  ];
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteReason, setDeleteReason]       = useState('');
+  const [deleteConfirm, setDeleteConfirm]     = useState('');
+  const [deleting, setDeleting]               = useState(false);
+  const [deleteError, setDeleteError]         = useState('');
+
+  async function handleDeleteAccount() {
+    if (deleteConfirm !== 'DELETE') return;
+    setDeleting(true);
+    setDeleteError('');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setDeleting(false); return; }
+    const res = await fetch('/api/account/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ reason: deleteReason }),
+    });
+    if (res.ok) {
+      await supabase.auth.signOut();
+      router.push('/');
+    } else {
+      setDeleteError('Failed to delete account. Please try again.');
+      setDeleting(false);
+    }
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-white flex items-center justify-center text-[#979797]">Loading...</div>
   );
@@ -422,6 +456,7 @@ export default function ProfilePage() {
   const displayListings = tab === 'active' ? activeListings : soldListings;
 
   return (
+    <>
     <div className="min-h-screen bg-white">
       <div className="max-w-4xl mx-auto px-6 py-10 space-y-6">
 
@@ -952,7 +987,89 @@ export default function ProfilePage() {
         </div>
         </div>)}
 
+        {/* ── Delete account ───────────────────────────────────────────────── */}
+        <div className="border-t border-[#dedede] pt-6">
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            className="flex items-center gap-2 text-sm text-[#979797] hover:text-red-500 transition"
+          >
+            <Trash2 size={14} strokeWidth={2} />
+            Delete my account
+          </button>
+        </div>
+
       </div>
     </div>
+
+    {/* ── Delete account modal ─────────────────────────────────────────────── */}
+    {showDeleteModal && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-3xl p-7 max-w-md w-full shadow-2xl space-y-5">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center shrink-0">
+              <AlertTriangle size={20} strokeWidth={2} className="text-red-500" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-[#111]">Delete account</h2>
+              <p className="text-xs text-[#979797]">This cannot be undone. All your data will be permanently removed.</p>
+            </div>
+          </div>
+
+          {/* Reason */}
+          <div>
+            <label className="block text-sm font-medium text-[#111] mb-2">Why are you leaving?</label>
+            <div className="space-y-2">
+              {DELETION_REASONS.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setDeleteReason(r)}
+                  className={`w-full text-left px-4 py-2.5 rounded-xl border text-sm transition ${
+                    deleteReason === r
+                      ? 'border-red-400 bg-red-50 text-red-700 font-medium'
+                      : 'border-[#dedede] text-[#111] hover:border-red-300'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Confirmation */}
+          <div>
+            <label className="block text-sm font-medium text-[#111] mb-1.5">
+              Type <span className="font-mono font-bold text-red-500">DELETE</span> to confirm
+            </label>
+            <input
+              value={deleteConfirm}
+              onChange={e => setDeleteConfirm(e.target.value)}
+              placeholder="DELETE"
+              className="w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400"
+            />
+          </div>
+
+          {deleteError && (
+            <p className="text-xs text-red-500">{deleteError}</p>
+          )}
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => { setShowDeleteModal(false); setDeleteReason(''); setDeleteConfirm(''); setDeleteError(''); }}
+              className="flex-1 py-3 border border-[#dedede] rounded-full text-sm font-medium text-[#979797] hover:border-[#111] transition"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDeleteAccount}
+              disabled={!deleteReason || deleteConfirm !== 'DELETE' || deleting}
+              className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:bg-[#dedede] disabled:text-[#979797] text-white rounded-full text-sm font-semibold transition"
+            >
+              {deleting ? 'Deleting…' : 'Delete account'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

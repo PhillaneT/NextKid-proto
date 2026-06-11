@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
   // RULE: Always re-validate at order creation — state may have changed since quote was fetched
   const { data: listing, error: listingError } = await serverClient
     .from('listings')
-    .select('seller_id, price_cents, status, is_multi_item, available_count')
+    .select('seller_id, price_cents, status, is_multi_item, available_count, seller_school_id, shipping_methods')
     .eq('id', listingId)
     .single()
 
@@ -95,6 +95,14 @@ export async function POST(req: NextRequest) {
   }
   if (listing.seller_id === buyerId) {
     return NextResponse.json({ error: 'cannot_buy_own_item' }, { status: 400 })
+  }
+  // RULE: school delivery only valid if the seller opted in to SCHOOL_DROPOFF for this listing
+  // and the buyer is requesting delivery to that same school.
+  if (isSchoolDelivery) {
+    const sellerShippingMethods: string[] = listing.shipping_methods ?? []
+    if (!sellerShippingMethods.includes('SCHOOL_DROPOFF') || listing.seller_school_id !== deliverySchoolId) {
+      return NextResponse.json({ error: 'school_delivery_unavailable' }, { status: 400 })
+    }
   }
 
   // 4. Compute money

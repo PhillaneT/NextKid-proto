@@ -9,8 +9,8 @@ import {
 } from 'lucide-react';
 import {
   ALL_CATEGORIES, SCHOOL_SPECIFIC_CATEGORIES, SUBCATEGORIES,
-  LISTING_CONDITIONS, CLOTHING_SIZES, SHOE_SIZES, BOTTOM_SIZES,
-  SUBCATEGORY_SIZE_TYPE, GRADES, SA_PROVINCES,
+  SA_PROVINCES, SHOE_SIZE_GROUPS, SELLER_CONDITIONS,
+  buildListingTitle,
   canFitInLocker, getLockerSizeForParcel,
   calculateBuyerPrice, fmtRands,
 } from '@nextkid/shared';
@@ -33,17 +33,6 @@ const CATEGORY_ICON: Record<string, React.ReactNode> = {
 
 const inputCls = 'w-full bg-[#f4f4f4] border border-[#dedede] rounded-xl px-4 py-3 text-[#111] focus:outline-none focus:border-[#BE1E2D] transition placeholder-[#979797]';
 const labelCls = 'block text-sm text-[#979797] mb-2 font-medium';
-
-// RULE: Only show fields relevant to the chosen category — never ask pointless questions
-const CATEGORY_FIELDS: Record<string, { clothingSize?: true; shoeSize?: true; gender?: true; grade?: true; dimensions?: true }> = {
-  'School Uniforms':    { clothingSize: true, gender: true, grade: true },
-  'School Sports Kit':  { clothingSize: true, gender: true },
-  'Shoes':              { shoeSize: true },
-  'Sports Equipment':   {},
-  'Books & Stationery': { grade: true },
-  'Bags & Accessories': { dimensions: true },
-  'Other':              {},
-};
 
 const LOCKER_SIZE_LABELS: Record<string, string> = {
   'V4-XS': 'Extra Small',
@@ -80,27 +69,12 @@ export default function NewListingPage() {
 
   // Step 3 — item details
   const [form, setForm] = useState({
-    title: '',
     subcategory: '',
+    condition: 'good' as typeof SELLER_CONDITIONS[number],
     price: '',
-    condition: 'good' as typeof LISTING_CONDITIONS[number],
     size: '',
-    gender: '' as 'boys' | 'girls' | 'unisex' | '',
-    grade: '',
     description: '',
   });
-
-  // Step 3 — multi-item support
-  type ListingItemDraft = { key: string; name: string; price: string; size_label: string }
-  const [isMultiItem, setIsMultiItem] = useState(false);
-  const [draftItems, setDraftItems]   = useState<ListingItemDraft[]>([
-    { key: crypto.randomUUID(), name: '', price: '', size_label: '' },
-  ]);
-  const addDraftItem  = () => setDraftItems(prev => [...prev, { key: crypto.randomUUID(), name: '', price: '', size_label: '' }]);
-  const removeDraftItem = (key: string) => setDraftItems(prev => prev.filter(i => i.key !== key));
-  const updateDraftItem = (key: string, field: keyof ListingItemDraft, value: string) =>
-    setDraftItems(prev => prev.map(i => i.key === key ? { ...i, [field]: value } : i));
-  const validItems = draftItems.filter(i => i.name.trim() && parseFloat(i.price) > 0);
 
   // Step 4 — parcel dimensions + shipping methods
   const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
@@ -131,6 +105,8 @@ export default function NewListingPage() {
   // RULE: if PUDO_DROPOFF is selected and parcel fits a locker, a drop-off locker is required
   const pudoDropoffNeedsLocker = shippingMethods.includes('PUDO_DROPOFF') && fitsInLocker;
   const shippingComplete = shippingMethods.length > 0 && (!pudoDropoffNeedsLocker || !!pudoLockerId);
+  // School drop-off only makes sense if this listing is tied to a school
+  const hasSchoolContext = selectedSchool !== null || profileSchools.length > 0;
 
   const toggleShipping = (method: SellerShippingOption) => {
     setShippingMethods(prev =>
@@ -218,15 +194,12 @@ export default function NewListingPage() {
       .eq('id', user.id).single();
 
     // price_cents stores the BUYER price (gross-up) so listing cards show what the buyer pays.
-    // For multi-item listings, use the gross-up of the cheapest item as the "from R X" price.
-    const sellerPayoutRands = isMultiItem
-      ? Math.min(...validItems.map(i => parseFloat(i.price)))
-      : parseFloat(form.price);
+    const sellerPayoutRands = parseFloat(form.price);
     const priceCents = calculateBuyerPrice(sellerPayoutRands).buyerPriceCents;
 
     const { data: newListing, error: insertError } = await supabase.from('listings').insert({
       seller_id:            user.id,
-      title:                form.title,
+      title:                buildListingTitle(category, form.subcategory, form.size),
       description:          form.description || null,
       // RULE: price stored in cents — Stitch processes ZAR in cents natively
       price_cents:          priceCents,
@@ -250,8 +223,6 @@ export default function NewListingPage() {
       // Item attributes
       is_school_specific:   isSchoolSpecific,
       size:                 form.size || null,
-      gender:               form.gender || null,
-      grade:                form.grade ? parseInt(form.grade) : null,
 
       // RULE: parcel dimensions required before listing can go ACTIVE
       parcel_length_cm:     parcelDims!.lengthCm,
@@ -265,34 +236,12 @@ export default function NewListingPage() {
       // RULE: if PUDO_DROPOFF selected, seller's chosen drop-off locker is required and stored here
       pudo_locker_id:       pudoLockerId   || null,
       pudo_locker_name:     pudoLockerName || null,
-
-      // Multi-item fields
-      is_multi_item:        isMultiItem,
-      item_count:           isMultiItem ? validItems.length : 1,
-      available_count:      isMultiItem ? validItems.length : 1,
     }).select('id').single();
 
     if (insertError || !newListing) {
       setLoading(false);
       setError('Error: ' + (insertError?.message ?? 'Unknown error'));
       return;
-    }
-
-    // Insert listing_items for multi-item listings
-    if (isMultiItem && validItems.length > 0) {
-      const { error: itemsError } = await supabase.from('listing_items').insert(
-        validItems.map(i => ({
-          listing_id:  newListing.id,
-          name:        i.name.trim(),
-          price_cents: Math.round(parseFloat(i.price) * 100),
-          size_label:  i.size_label.trim() || null,
-        }))
-      );
-      if (itemsError) {
-        setLoading(false);
-        setError('Items saved but listing_items failed: ' + itemsError.message);
-        return;
-      }
     }
 
     setLoading(false);
@@ -472,27 +421,6 @@ export default function NewListingPage() {
           {step === 3 && <>
             <h2 className="text-[#111] font-semibold text-lg mb-4">Item details</h2>
 
-            {/* ── Multi-item toggle — choose FIRST before filling anything ── */}
-            <div className="flex items-center justify-between p-4 bg-[#f4f4f4] rounded-2xl border border-[#dedede]">
-              <div>
-                <p className="text-sm font-semibold text-[#111]">Multiple items in this listing?</p>
-                <p className="text-xs text-[#979797] mt-0.5">e.g. a bag with shoes, shirts and pants — each priced separately</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsMultiItem(v => !v)}
-                className={`relative w-11 h-6 rounded-full transition ${isMultiItem ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${isMultiItem ? 'left-6' : 'left-1'}`} />
-              </button>
-            </div>
-
-            <div>
-              <label className={labelCls}>Title</label>
-              <input className={inputCls} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
-                placeholder="e.g. Grey flannel trousers size 32" />
-            </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Subcategory</label>
@@ -503,182 +431,49 @@ export default function NewListingPage() {
               </div>
               <div>
                 <label className={labelCls}>Condition</label>
-                <select className={inputCls} value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value as typeof LISTING_CONDITIONS[number] })}>
-                  {LISTING_CONDITIONS.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+                <select className={inputCls} value={form.condition}
+                  onChange={e => setForm({ ...form, condition: e.target.value as typeof SELLER_CONDITIONS[number] })}>
+                  {SELLER_CONDITIONS.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
                 </select>
               </div>
             </div>
 
-            {/* Context-aware fields — subcategory drives the size picker */}
-            {(() => {
-              const fields   = CATEGORY_FIELDS[category] ?? {};
-              const sizeType = SUBCATEGORY_SIZE_TYPE[form.subcategory] ?? null;
-              return (
-                <>
-                  {/* Size + gender — only shown once a subcategory is chosen */}
-                  {sizeType === 'clothing' && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className={labelCls}>Clothing Size <span className="text-[#979797] font-normal">(SA sizing)</span></label>
-                        <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
-                          <option value="">Select size...</option>
-                          {CLOTHING_SIZES.map(s => <option key={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      {fields.gender && (
-                        <div>
-                          <label className={labelCls}>Gender</label>
-                          <select className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as typeof form.gender })}>
-                            <option value="">Select...</option>
-                            <option value="boys">Boys</option>
-                            <option value="girls">Girls</option>
-                            <option value="unisex">Unisex</option>
-                          </select>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {sizeType === 'bottom' && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className={labelCls}>Waist Size</label>
-                        <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
-                          <option value="">Select waist...</option>
-                          {BOTTOM_SIZES.map(s => <option key={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      {fields.gender && (
-                        <div>
-                          <label className={labelCls}>Gender</label>
-                          <select className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as typeof form.gender })}>
-                            <option value="">Select...</option>
-                            <option value="boys">Boys</option>
-                            <option value="girls">Girls</option>
-                            <option value="unisex">Unisex</option>
-                          </select>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {(sizeType === 'shoe' || fields.shoeSize) && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className={labelCls}>Shoe Size <span className="text-[#979797] font-normal">(UK sizing — used in SA)</span></label>
-                        <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
-                          <option value="">Select size...</option>
-                          <optgroup label="Children">
-                            {['10C','11C','12C','13C'].map(s => <option key={s} value={s}>{s}</option>)}
-                          </optgroup>
-                          <optgroup label="Youth">
-                            {['1','2','3','4','5'].map(s => <option key={s} value={s}>{s}</option>)}
-                          </optgroup>
-                          <optgroup label="Adult">
-                            {['6','7','8','9','10','11','12','13'].map(s => <option key={s} value={s}>{s}</option>)}
-                          </optgroup>
-                        </select>
-                      </div>
-                      {fields.gender && (
-                        <div>
-                          <label className={labelCls}>Gender</label>
-                          <select className={inputCls} value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value as typeof form.gender })}>
-                            <option value="">Select...</option>
-                            <option value="boys">Boys</option>
-                            <option value="girls">Girls</option>
-                            <option value="unisex">Unisex</option>
-                          </select>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {fields.dimensions && !sizeType && (
-                    <div>
-                      <label className={labelCls}>Dimensions / Capacity</label>
-                      <input className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}
-                        placeholder="e.g. 42L, 30×20×10 cm" />
-                    </div>
-                  )}
-                  {fields.grade && (
-                    <div>
-                      <label className={labelCls}>Grade</label>
-                      <select className={inputCls} value={form.grade} onChange={e => setForm({ ...form, grade: e.target.value })}>
-                        <option value="">Select grade...</option>
-                        {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
-                      </select>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-
-            {/* Single item: price + buyer price widget */}
-            {!isMultiItem && (
-              <div>
-                <label className={labelCls}>Your asking price (Rands)</label>
-                <input type="number" className={inputCls} value={form.price}
-                  onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" min="10" />
-                {parseFloat(form.price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(form.price)} />}
-              </div>
-            )}
-
-            {/* Multi-item: per-item list */}
-            {isMultiItem && (
-              <div className="space-y-3">
-                <p className="text-sm font-semibold text-[#111]">Items in this listing <span className="text-[#979797] font-normal">(add at least 1)</span></p>
-                {draftItems.map((item, idx) => (
-                  <div key={item.key} className="border border-[#dedede] rounded-2xl p-4 space-y-3 relative">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-[#979797] uppercase tracking-wide">Item {idx + 1}</span>
-                      {draftItems.length > 1 && (
-                        <button type="button" onClick={() => removeDraftItem(item.key)}
-                          className="text-[#979797] hover:text-red-500 transition text-lg leading-none">×</button>
-                      )}
-                    </div>
-                    <div>
-                      <label className={labelCls}>Item name *</label>
-                      <input className={inputCls} value={item.name}
-                        onChange={e => updateDraftItem(item.key, 'name', e.target.value)}
-                        placeholder="e.g. Grey school trousers" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className={labelCls}>Price (R) *</label>
-                        <input type="number" className={inputCls} value={item.price}
-                          onChange={e => updateDraftItem(item.key, 'price', e.target.value)}
-                          placeholder="80" min="1" />
-                      </div>
-                      <div>
-                        <label className={labelCls}>Size <span className="text-[#979797]">(optional)</span></label>
-                        <input className={inputCls} value={item.size_label}
-                          onChange={e => updateDraftItem(item.key, 'size_label', e.target.value)}
-                          placeholder="e.g. Size 32, L" />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                <button type="button" onClick={addDraftItem}
-                  className="w-full py-2.5 border border-dashed border-[#BE1E2D] text-[#BE1E2D] rounded-2xl text-sm font-medium hover:bg-red-50 transition">
-                  + Add another item
-                </button>
-                {validItems.length > 0 && (
-                  <div className="flex justify-between items-center px-4 py-3 bg-[#f4f4f4] rounded-xl">
-                    <span className="text-sm text-[#979797]">{validItems.length} item{validItems.length !== 1 ? 's' : ''} · from R{Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}</span>
-                    <span className="text-sm font-bold text-[#BE1E2D]">Total R{validItems.reduce((s, i) => s + parseFloat(i.price), 0).toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
-            )}
+            <div>
+              <label className={labelCls}>Size</label>
+              {category === 'Shoes' ? (
+                <select className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}>
+                  <option value="">Select size...</option>
+                  {SHOE_SIZE_GROUPS.map(group => (
+                    <optgroup key={group.label} label={`${group.label} (UK)`}>
+                      {group.sizes.map(s => <option key={s} value={s}>{s}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+              ) : (
+                <input className={inputCls} value={form.size} onChange={e => setForm({ ...form, size: e.target.value })}
+                  placeholder="e.g. Size 32, UK 8, Grade 5" />
+              )}
+            </div>
 
             <div>
-              <label className={labelCls}>Description</label>
-              <textarea className={`${inputCls} h-28 resize-none`} value={form.description}
-                onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder="Describe the listing — condition, why you're selling, any defects..." />
+              <label className={labelCls}>Your asking price (Rands)</label>
+              <input type="number" className={inputCls} value={form.price}
+                onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" min="10" />
+              {parseFloat(form.price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(form.price)} />}
+            </div>
+
+            <div>
+              <label className={labelCls}>Description <span className="text-[#979797] font-normal">(optional)</span></label>
+              <textarea className={`${inputCls} h-28 resize-none`} value={form.description} maxLength={100}
+                onChange={e => setForm({ ...form, description: e.target.value.slice(0, 100) })}
+                placeholder="e.g. Still in good condition, selling because my child outgrew it" />
+              <p className="text-xs text-[#979797] text-right mt-1">{form.description.length}/100</p>
             </div>
 
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={nextStep}
-                disabled={!form.title || (isMultiItem ? validItems.length === 0 : !form.price)}
+                disabled={!form.price}
                 className="flex-grow py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 Continue →
               </button>
@@ -796,6 +591,25 @@ export default function NewListingPage() {
                     />
                   </div>
                 )}
+
+                {/* School drop-off — only shown if this listing is tied to a school */}
+                {hasSchoolContext && (
+                  <button type="button" onClick={() => toggleShipping('SCHOOL_DROPOFF')}
+                    className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
+                      shippingMethods.includes('SCHOOL_DROPOFF')
+                        ? 'border-[#BE1E2D] bg-[#fde8ea]'
+                        : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
+                    }`}>
+                    <School size={22} className={`mt-0.5 shrink-0 ${shippingMethods.includes('SCHOOL_DROPOFF') ? 'text-[#BE1E2D]' : 'text-[#979797]'}`} />
+                    <div>
+                      <p className="text-[#111] font-medium text-sm">School drop-off — R20</p>
+                      <p className="text-[#979797] text-xs mt-0.5">
+                        Drop off at school for buyers from the same school to collect — flat R20 fee
+                      </p>
+                    </div>
+                    {shippingMethods.includes('SCHOOL_DROPOFF') && <CheckCircle2 size={18} className="text-[#BE1E2D] ml-auto shrink-0 mt-0.5" />}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -839,7 +653,7 @@ export default function NewListingPage() {
             <div className="bg-[#f4f4f4] border border-[#dedede] rounded-xl p-4 text-sm space-y-1.5">
               <p className="text-[#979797]">Category: <span className="text-[#111] font-medium">{category}</span></p>
               {selectedSchool && <p className="text-[#979797]">School: <span className="text-[#111] font-medium">{selectedSchool.name}</span></p>}
-              <p className="text-[#979797]">Title: <span className="text-[#111] font-medium">{form.title}</span></p>
+              <p className="text-[#979797]">Listing title: <span className="text-[#111] font-medium">{buildListingTitle(category, form.subcategory, form.size)}</span></p>
               <p className="text-[#979797]">Price: <span className="text-[#BE1E2D] font-bold">R{form.price}</span></p>
               {form.size && <p className="text-[#979797]">Size: <span className="text-[#111] font-medium">{form.size}</span></p>}
               <p className="text-[#979797]">Parcel: <span className="text-[#111] font-medium">{parcel.l}×{parcel.w}×{parcel.h} cm · {parcel.weight} kg</span></p>
@@ -877,7 +691,7 @@ function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
       <div className="px-4 py-3 space-y-1.5">
         <Row step="1" label="Your guaranteed payout"       value={fmtRands(b.sellerPayoutCents)} />
         <Row step="2" label="+ School delivery fee"        value={fmtRands(b.subtotalCents)}      sub={`+ ${fmtRands(b.deliveryFeeCents)}`} />
-        <Row step="3" label="÷ (1 − 8%) NextKid markup"   value={fmtRands(b.afterMarkupCents)}   sub={`+ ${fmtRands(b.platformFeeCents)}`} muted />
+        <Row step="3" label="÷ (1 − 7.5%) NextKid markup" value={fmtRands(b.afterMarkupCents)}   sub={`+ ${fmtRands(b.platformFeeCents)}`} muted />
         <Row step="4" label="÷ (1 − 2.5%) Stitch fee"     value={fmtRands(b.buyerRawCents)}      sub={`+ ${fmtRands(b.gatewayFeeCents)}`}  muted />
         <div className="border-t border-[#dedede] pt-2 mt-1 space-y-1.5">
           <Row step="5" label="Round UP to nearest R25"   value={fmtRands(b.buyerPriceCents)} highlight />
@@ -896,7 +710,7 @@ function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
           </div>
         </div>
         <p className="text-[#979797] text-center mt-2 text-[10px]">
-          8% markup is for testing only — will be updated before going live
+          7.5% markup is for testing only — will be updated before going live
         </p>
       </div>
     </div>

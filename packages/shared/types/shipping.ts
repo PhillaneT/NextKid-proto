@@ -115,7 +115,7 @@ export type ShippingMethod = 'D2D' | 'D2L' | 'L2D' | 'L2L';
 /**
  * What the seller can offer
  */
-export type SellerShippingOption = 'PICKUP' | 'PUDO_DROPOFF';
+export type SellerShippingOption = 'PICKUP' | 'PUDO_DROPOFF' | 'SCHOOL_DROPOFF';
 
 // ============================================
 // SELLER SHIPPING PROFILE

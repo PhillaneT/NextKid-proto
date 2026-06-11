@@ -43,7 +43,7 @@ type Listing = { title: string; images: string[] };
 const CRIMSON = '#BE1E2D';
 const BORDER  = '#dedede';
 const SURFACE = '#f4f4f4';
-const COMMISSION_RATE = parseFloat(process.env.EXPO_PUBLIC_COMMISSION_RATE ?? '0.08');
+const COMMISSION_RATE = parseFloat(process.env.EXPO_PUBLIC_COMMISSION_RATE ?? '0.075');
 
 const SHIPPING_LABELS: Record<string, string> = {
   D2D: 'Door-to-door', D2L: 'PUDO locker delivery',

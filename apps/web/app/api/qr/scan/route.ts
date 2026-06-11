@@ -257,7 +257,7 @@ export async function POST(req: NextRequest) {
   } else {
     // ── COLLECTION scanned ─────────────────────────────────────────────────
 
-    const commissionRate  = parseFloat(process.env.PLATFORM_COMMISSION_RATE ?? '0.08')
+    const commissionRate  = parseFloat(process.env.PLATFORM_COMMISSION_RATE ?? '0.075')
     const commissionCents = Math.round(order.item_price_cents * commissionRate)
     const sellerPayout    = order.item_price_cents - commissionCents
 

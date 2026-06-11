@@ -18,6 +18,10 @@ export const PLATFORM_DEFAULTS = {
 export const LISTING_CONDITIONS = ['new', 'like_new', 'good', 'fair', 'poor'] as const;
 export type ListingCondition = typeof LISTING_CONDITIONS[number];
 
+// Simplified condition options shown on the seller "sell item" form —
+// reduces admin vs. the full LISTING_CONDITIONS list used elsewhere
+export const SELLER_CONDITIONS = ['new', 'good', 'fair'] as const;
+
 // Categories where the item belongs to a specific school (uniform, team kit)
 // vs generic items sold nationwide (shoes, bags, books, equipment)
 export const SCHOOL_SPECIFIC_CATEGORIES = ['School Uniforms', 'School Sports Kit'] as const;
@@ -75,17 +79,33 @@ export const BOTTOM_SIZES = [
 ] as const;
 
 // SA shoe sizes — UK system (used in South Africa)
-// Children: 10C–13C → Youth: 1–5 → Adult: 6–13
+// Toddler: 3C–9C → Children: 10C–13C → Youth: 1–5 → Adult: 6–13
 export const SHOE_SIZES = [
+  '3C', '4C', '5C', '6C', '7C', '8C', '9C',
   '10C', '11C', '12C', '13C',
   '1', '2', '3', '4', '5',
   '6', '7', '8', '9', '10', '11', '12', '13',
+] as const;
+
+// Grouped for UI size pickers — toddler through adult
+export const SHOE_SIZE_GROUPS = [
+  { label: 'Toddler',  sizes: ['3C', '4C', '5C', '6C', '7C', '8C', '9C'] },
+  { label: 'Children', sizes: ['10C', '11C', '12C', '13C'] },
+  { label: 'Youth',    sizes: ['1', '2', '3', '4', '5'] },
+  { label: 'Adult',    sizes: ['6', '7', '8', '9', '10', '11', '12', '13'] },
 ] as const;
 
 export const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 // Maps each subcategory to the right size picker.
 // 'clothing' = tops/dresses, 'bottom' = waist/pants, 'shoe' = shoe sizes, 'none' = no size
+// Sellers don't enter a title — it's derived from category/subcategory/size
+// so listings still have a display name across browse, cart, orders, etc.
+export function buildListingTitle(category: string, subcategory: string, size: string): string {
+  const base = subcategory || category;
+  return size ? `${base} - Size ${size}` : base;
+}
+
 export const SUBCATEGORY_SIZE_TYPE: Record<string, 'clothing' | 'bottom' | 'shoe' | 'none'> = {
   // School Uniforms
   'Tops & Shirts':      'clothing',

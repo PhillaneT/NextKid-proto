@@ -11,8 +11,8 @@ import {
 } from 'lucide-react-native';
 import {
   ALL_CATEGORIES, SCHOOL_SPECIFIC_CATEGORIES, SUBCATEGORIES,
-  LISTING_CONDITIONS, CLOTHING_SIZES, BOTTOM_SIZES,
-  SUBCATEGORY_SIZE_TYPE, GRADES, SA_PROVINCES,
+  SA_PROVINCES, SHOE_SIZE_GROUPS, SELLER_CONDITIONS,
+  buildListingTitle,
   canFitInLocker, getLockerSizeForParcel,
   calculateBuyerPrice, fmtRands,
 } from '@nextkid/shared';
@@ -30,17 +30,6 @@ function CategoryIcon({ name, color }: { name: string; color: string }) {
     default:                   return <Package {...props} />;
   }
 }
-
-// RULE: Only show fields relevant to the chosen category — never ask pointless questions
-const CATEGORY_FIELDS: Record<string, { clothingSize?: true; shoeSize?: true; gender?: true; grade?: true; dimensions?: true }> = {
-  'School Uniforms':    { clothingSize: true, gender: true, grade: true },
-  'School Sports Kit':  { clothingSize: true, gender: true },
-  'Shoes':              { shoeSize: true },
-  'Sports Equipment':   {},
-  'Books & Stationery': { grade: true },
-  'Bags & Accessories': { dimensions: true },
-  'Other':              {},
-};
 
 const LOCKER_SIZE_LABELS: Record<string, string> = {
   'V4-XS': 'Extra Small', 'V4-S': 'Small', 'V4-M': 'Medium',
@@ -70,26 +59,11 @@ export default function SellScreen() {
   const [profileSchools, setProfileSchools] = useState<School[]>([]);
 
   // Step 3
-  const [title, setTitle]             = useState('');
   const [subcategory, setSubcategory] = useState('');
+  const [condition, setCondition]     = useState<typeof SELLER_CONDITIONS[number]>('good');
   const [price, setPrice]             = useState('');
-  const [condition, setCondition]     = useState<typeof LISTING_CONDITIONS[number]>('good');
   const [size, setSize]               = useState('');
-  const [gender, setGender]           = useState<'boys' | 'girls' | 'unisex' | ''>('');
-  const [grade, setGrade]             = useState('');
   const [description, setDescription] = useState('');
-
-  // Step 3 — multi-item support
-  type ItemDraft = { key: string; name: string; price: string; size_label: string }
-  const [isMultiItem, setIsMultiItem] = useState(false);
-  const [draftItems, setDraftItems]   = useState<ItemDraft[]>([
-    { key: Math.random().toString(36), name: '', price: '', size_label: '' },
-  ]);
-  const addDraftItem    = () => setDraftItems(p => [...p, { key: Math.random().toString(36), name: '', price: '', size_label: '' }]);
-  const removeDraftItem = (key: string) => setDraftItems(p => p.filter(i => i.key !== key));
-  const updateDraftItem = (key: string, field: keyof ItemDraft, value: string) =>
-    setDraftItems(p => p.map(i => i.key === key ? { ...i, [field]: value } : i));
-  const validItems = draftItems.filter(i => i.name.trim() && parseFloat(i.price) > 0);
 
   // Step 4 — parcel dimensions + shipping methods
   const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
@@ -107,6 +81,8 @@ export default function SellScreen() {
   const parcelComplete  = parcelDims !== null;
   // RULE: at least one shipping method required before listing goes ACTIVE
   const shippingComplete = shippingMethods.length > 0;
+  // School drop-off only makes sense if this listing is tied to a school
+  const hasSchoolContext = selectedSchool !== null || profileSchools.length > 0;
 
   const toggleShipping = (method: SellerShippingOption) =>
     setShippingMethods(prev =>
@@ -155,19 +131,15 @@ export default function SellScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!title) { Alert.alert('Missing fields', 'Title is required.'); return; }
-    if (!isMultiItem && !price) { Alert.alert('Missing fields', 'Price is required.'); return; }
-    if (isMultiItem && validItems.length === 0) { Alert.alert('Missing items', 'Add at least one item with a name and price.'); return; }
+    if (!price) { Alert.alert('Missing fields', 'Price is required.'); return; }
     if (!parcelComplete || !shippingComplete) {
       Alert.alert('Incomplete', 'Please fill in parcel dimensions and select at least one shipping method.');
       return;
     }
 
-    const priceCents = isMultiItem
-      ? Math.round(Math.min(...validItems.map(i => parseFloat(i.price))) * 100)
-      : Math.round(parseFloat(price) * 100);
+    const priceCents = Math.round(parseFloat(price) * 100);
 
-    if (!isMultiItem && (isNaN(priceCents) || priceCents <= 0)) {
+    if (isNaN(priceCents) || priceCents <= 0) {
       Alert.alert('Invalid price', 'Enter a valid price.'); return;
     }
 
@@ -179,14 +151,12 @@ export default function SellScreen() {
       .select('province, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
       .eq('id', user.id).single();
 
-    const sellerPayoutRands = isMultiItem
-      ? Math.min(...validItems.map(i => parseFloat(i.price)))
-      : parseFloat(price);
+    const sellerPayoutRands = parseFloat(price);
     const buyerPriceCents = calculateBuyerPrice(sellerPayoutRands).buyerPriceCents;
 
     const { data: newListing, error } = await supabase.from('listings').insert({
       seller_id:            user.id,
-      title:                title.trim(),
+      title:                buildListingTitle(category, subcategory, size),
       description:          description.trim() || null,
       price_cents:          buyerPriceCents,
       condition:            condition.toUpperCase(),
@@ -206,33 +176,15 @@ export default function SellScreen() {
 
       is_school_specific:   isSchoolSpecific,
       size:                 size || null,
-      gender:               gender || null,
-      grade:                grade ? parseInt(grade) : null,
 
       parcel_length_cm:     parcelDims!.lengthCm,
       parcel_width_cm:      parcelDims!.widthCm,
       parcel_height_cm:     parcelDims!.heightCm,
       parcel_weight_kg:     parcelDims!.weightKg,
       shipping_methods:     shippingMethods,
-
-      is_multi_item:        isMultiItem,
-      item_count:           isMultiItem ? validItems.length : 1,
-      available_count:      isMultiItem ? validItems.length : 1,
     }).select('id').single();
 
     if (error || !newListing) { setLoading(false); Alert.alert('Error', error?.message ?? 'Unknown error'); return; }
-
-    if (isMultiItem && validItems.length > 0) {
-      const { error: itemsErr } = await supabase.from('listing_items').insert(
-        validItems.map(i => ({
-          listing_id:  newListing.id,
-          name:        i.name.trim(),
-          price_cents: Math.round(parseFloat(i.price) * 100),
-          size_label:  i.size_label.trim() || null,
-        }))
-      );
-      if (itemsErr) { setLoading(false); Alert.alert('Error saving items', itemsErr.message); return; }
-    }
 
     setLoading(false);
     setSuccess(true);
@@ -240,8 +192,8 @@ export default function SellScreen() {
 
   const reset = () => {
     setStep(1); setCategory(''); setSelectedSchool(null); setProvince('');
-    setTitle(''); setPrice(''); setCondition('good'); setSize('');
-    setGender(''); setGrade(''); setDescription(''); setSubcategory('');
+    setPrice(''); setSize(''); setDescription('');
+    setSubcategory(''); setCondition('good');
     setParcel({ l: '', w: '', h: '', weight: '' }); setShippingMethods([]);
     setSuccess(false);
   };
@@ -382,24 +334,6 @@ export default function SellScreen() {
         {step === 3 && <>
           <Text style={styles.stepTitle}>Item details</Text>
 
-          {/* ── Multi-item toggle — choose FIRST before filling anything ── */}
-          <View style={styles.multiToggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.multiToggleTitle}>Multiple items in this listing?</Text>
-              <Text style={styles.multiToggleSub}>e.g. shoes, shirt and pants — each priced separately</Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.toggle, isMultiItem && styles.toggleOn]}
-              onPress={() => setIsMultiItem(v => !v)}
-            >
-              <View style={[styles.toggleThumb, isMultiItem && styles.toggleThumbOn]} />
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.label}>Title *</Text>
-          <TextInput style={styles.input} value={title} onChangeText={setTitle}
-            placeholder="e.g. Grey flannel trousers size 32" placeholderTextColor="#979797" />
-
           <Text style={styles.label}>Subcategory</Text>
           <View style={styles.chipRow}>
             {category && SUBCATEGORIES[category as ListingCategory].map(s => (
@@ -411,167 +345,54 @@ export default function SellScreen() {
 
           <Text style={styles.label}>Condition</Text>
           <View style={styles.chipRow}>
-            {LISTING_CONDITIONS.map(c => (
+            {SELLER_CONDITIONS.map(c => (
               <TouchableOpacity key={c} onPress={() => setCondition(c)} style={[styles.chip, condition === c && styles.chipActive]}>
-                <Text style={[styles.chipText, condition === c && styles.chipTextActive]}>{c.replace(/_/g, ' ')}</Text>
+                <Text style={[styles.chipText, condition === c && styles.chipTextActive]}>{c.charAt(0).toUpperCase() + c.slice(1)}</Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {/* Context-aware fields — subcategory drives the size picker */}
-          {(() => {
-            const fields   = CATEGORY_FIELDS[category] ?? {};
-            const sizeType = SUBCATEGORY_SIZE_TYPE[subcategory] ?? null;
-            return (
-              <>
-                {/* Clothing size — tops, dresses, blazers, sport kits */}
-                {sizeType === 'clothing' && <>
-                  <Text style={styles.label}>Clothing Size <Text style={{ color: '#979797', fontWeight: '400' }}>(SA sizing)</Text></Text>
-                  <View style={styles.chipRow}>
-                    {CLOTHING_SIZES.map(s => (
-                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
-                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>}
-                {/* Waist size — pants, shorts, skirts */}
-                {sizeType === 'bottom' && <>
-                  <Text style={styles.label}>Waist Size</Text>
-                  <View style={styles.chipRow}>
-                    {BOTTOM_SIZES.map(s => (
-                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
-                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>}
-                {/* Shoe size — SA UK sizing */}
-                {(sizeType === 'shoe' || fields.shoeSize) && <>
-                  <Text style={styles.label}>Shoe Size <Text style={{ color: '#979797', fontWeight: '400' }}>(UK — used in SA)</Text></Text>
-                  <Text style={[styles.label, { color: '#979797', fontSize: 10, marginTop: -4 }]}>Children</Text>
-                  <View style={styles.chipRow}>
-                    {['10C','11C','12C','13C'].map(s => (
-                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
-                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <Text style={[styles.label, { color: '#979797', fontSize: 10, marginTop: 4 }]}>Youth</Text>
-                  <View style={styles.chipRow}>
-                    {['1','2','3','4','5'].map(s => (
-                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
-                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <Text style={[styles.label, { color: '#979797', fontSize: 10, marginTop: 4 }]}>Adult</Text>
-                  <View style={styles.chipRow}>
-                    {['6','7','8','9','10','11','12','13'].map(s => (
-                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
-                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>}
-                {fields.dimensions && !sizeType && <>
-                  <Text style={styles.label}>Dimensions / Capacity</Text>
-                  <TextInput style={styles.input} value={size} onChangeText={setSize}
-                    placeholder="e.g. 42L, 30×20×10 cm" placeholderTextColor="#979797" />
-                </>}
-                {fields.gender && <>
-                  <Text style={styles.label}>Gender</Text>
-                  <View style={styles.chipRow}>
-                    {(['boys', 'girls', 'unisex'] as const).map(g => (
-                      <TouchableOpacity key={g} onPress={() => setGender(g)} style={[styles.chip, gender === g && styles.chipActive]}>
-                        <Text style={[styles.chipText, gender === g && styles.chipTextActive]}>{g}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>}
-                {fields.grade && <>
-                  <Text style={styles.label}>Grade</Text>
-                  <View style={styles.chipRow}>
-                    {GRADES.map(g => (
-                      <TouchableOpacity key={g} onPress={() => setGrade(String(g))} style={[styles.chip, grade === String(g) && styles.chipActive]}>
-                        <Text style={[styles.chipText, grade === String(g) && styles.chipTextActive]}>Gr {g}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>}
-              </>
-            );
-          })()}
-
-          {/* Single item: price + buyer price calculator */}
-          {!isMultiItem && (
+          <Text style={styles.label}>Size</Text>
+          {category === 'Shoes' ? (
             <>
-              <Text style={styles.label}>Price (R) *</Text>
-              <TextInput style={styles.input} value={price} onChangeText={setPrice}
-                placeholder="250" placeholderTextColor="#979797" keyboardType="numeric" />
-              {parseFloat(price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(price)} />}
-            </>
-          )}
-
-          {/* Multi-item: per-item list */}
-          {isMultiItem && (
-            <>
-              <Text style={styles.label}>Items in this listing <Text style={{ color: '#979797', fontWeight: '400' }}>(at least 1)</Text></Text>
-              {draftItems.map((item, idx) => (
-                <View key={item.key} style={styles.itemCard}>
-                  <View style={styles.itemCardHeader}>
-                    <Text style={styles.itemCardNum}>Item {idx + 1}</Text>
-                    {draftItems.length > 1 && (
-                      <TouchableOpacity onPress={() => removeDraftItem(item.key)} hitSlop={8}>
-                        <Text style={{ color: '#979797', fontSize: 18, lineHeight: 20 }}>×</Text>
+              {SHOE_SIZE_GROUPS.map(group => (
+                <View key={group.label}>
+                  <Text style={[styles.label, { color: '#979797', fontSize: 10, marginTop: 4 }]}>{group.label} (UK)</Text>
+                  <View style={styles.chipRow}>
+                    {group.sizes.map(s => (
+                      <TouchableOpacity key={s} onPress={() => setSize(s)} style={[styles.chip, size === s && styles.chipActive]}>
+                        <Text style={[styles.chipText, size === s && styles.chipTextActive]}>{s}</Text>
                       </TouchableOpacity>
-                    )}
-                  </View>
-                  <Text style={styles.label}>Name *</Text>
-                  <TextInput style={styles.input} value={item.name}
-                    onChangeText={v => updateDraftItem(item.key, 'name', v)}
-                    placeholder="e.g. Grey school trousers" placeholderTextColor="#979797" />
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.label}>Price (R) *</Text>
-                      <TextInput style={styles.input} value={item.price}
-                        onChangeText={v => updateDraftItem(item.key, 'price', v)}
-                        placeholder="80" placeholderTextColor="#979797" keyboardType="numeric" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.label}>Size <Text style={{ color: '#979797', fontWeight: '400' }}>(optional)</Text></Text>
-                      <TextInput style={styles.input} value={item.size_label}
-                        onChangeText={v => updateDraftItem(item.key, 'size_label', v)}
-                        placeholder="e.g. Size 32" placeholderTextColor="#979797" />
-                    </View>
+                    ))}
                   </View>
                 </View>
               ))}
-              <TouchableOpacity style={styles.addItemBtn} onPress={addDraftItem}>
-                <Text style={styles.addItemBtnText}>+ Add another item</Text>
-              </TouchableOpacity>
-              {validItems.length > 0 && (
-                <View style={styles.itemsSummary}>
-                  <Text style={styles.itemsSummaryText}>{validItems.length} item{validItems.length !== 1 ? 's' : ''} · from R{Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}</Text>
-                  <Text style={styles.itemsSummaryTotal}>Total R{validItems.reduce((s, i) => s + parseFloat(i.price), 0).toFixed(2)}</Text>
-                </View>
-              )}
             </>
+          ) : (
+            <TextInput style={styles.input} value={size} onChangeText={setSize}
+              placeholder="e.g. Size 32, UK 8, Grade 5" placeholderTextColor="#979797" />
           )}
 
-          <Text style={styles.label}>Description</Text>
+          <Text style={styles.label}>Price (R) *</Text>
+          <TextInput style={styles.input} value={price} onChangeText={setPrice}
+            placeholder="250" placeholderTextColor="#979797" keyboardType="numeric" />
+          {parseFloat(price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(price)} />}
+
+          <Text style={styles.label}>Description (optional)</Text>
           <TextInput style={[styles.input, { height: 90, textAlignVertical: 'top' }]}
-            value={description} onChangeText={setDescription}
-            placeholder="Condition, why you're selling, any defects..." placeholderTextColor="#979797" multiline />
+            value={description} onChangeText={t => setDescription(t.slice(0, 100))}
+            placeholder="e.g. Still in good condition, selling because my child outgrew it"
+            placeholderTextColor="#979797" multiline maxLength={100} />
+          <Text style={styles.charCount}>{description.length}/100</Text>
 
           <View style={styles.rowBtns}>
             <TouchableOpacity style={[styles.btn, styles.btnOutline, { flex: 1 }]} onPress={prevStep}>
               <Text style={styles.btnOutlineText}>← Back</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.btn, (!title || (isMultiItem ? validItems.length === 0 : !price)) && styles.btnDisabled, { flex: 2 }]}
+              style={[styles.btn, !price && styles.btnDisabled, { flex: 2 }]}
               onPress={nextStep}
-              disabled={!title || (isMultiItem ? validItems.length === 0 : !price)}>
+              disabled={!price}>
               <Text style={styles.btnText}>Continue →</Text>
             </TouchableOpacity>
           </View>
@@ -659,6 +480,20 @@ export default function SellScreen() {
             {shippingMethods.includes('PUDO_DROPOFF') && <Text style={{ color: BLUE, fontSize: 18, fontWeight: '700' }}>✓</Text>}
           </TouchableOpacity>
 
+          {/* School drop-off — only shown if this listing is tied to a school */}
+          {hasSchoolContext && (
+            <TouchableOpacity
+              onPress={() => toggleShipping('SCHOOL_DROPOFF')}
+              style={[styles.shippingCard, shippingMethods.includes('SCHOOL_DROPOFF') && styles.shippingCardActive]}>
+              <Text style={styles.shippingIcon}>🏫</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.shippingTitle, shippingMethods.includes('SCHOOL_DROPOFF') && { color: BLUE }]}>School drop-off — R20</Text>
+                <Text style={styles.shippingSub}>Drop off at school for buyers from the same school to collect — flat R20 fee</Text>
+              </View>
+              {shippingMethods.includes('SCHOOL_DROPOFF') && <Text style={{ color: BLUE, fontSize: 18, fontWeight: '700' }}>✓</Text>}
+            </TouchableOpacity>
+          )}
+
           <View style={styles.rowBtns}>
             <TouchableOpacity style={[styles.btn, styles.btnOutline, { flex: 1 }]} onPress={prevStep}>
               <Text style={styles.btnOutlineText}>← Back</Text>
@@ -680,16 +515,12 @@ export default function SellScreen() {
           <View style={styles.summaryBox}>
             <SummaryRow label="Category"  value={category} />
             {selectedSchool && <SummaryRow label="School" value={selectedSchool.name} />}
-            <SummaryRow label="Title"     value={title} />
-            {isMultiItem
-              ? <SummaryRow label="Items" value={`${validItems.length} items · from R${Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}`} />
-              : <SummaryRow label="Price" value={`R${price}`} />
-            }
+            <SummaryRow label="Listing title" value={buildListingTitle(category, subcategory, size)} />
+            <SummaryRow label="Price"     value={`R${price}`} />
             {subcategory && <SummaryRow label="Subcategory" value={subcategory} />}
-            <SummaryRow label="Condition" value={condition.replace(/_/g, ' ')} />
-            {size   && <SummaryRow label="Size"   value={size} />}
-            {gender && <SummaryRow label="Gender" value={gender} />}
-            {grade  && <SummaryRow label="Grade"  value={`Grade ${grade}`} />}
+            <SummaryRow label="Condition" value={condition.charAt(0).toUpperCase() + condition.slice(1)} />
+            {size && <SummaryRow label="Size" value={size} />}
+            {description && <SummaryRow label="Description" value={description} />}
             <SummaryRow label="Parcel"    value={`${parcel.l}×${parcel.w}×${parcel.h} cm · ${parcel.weight} kg`} />
             <SummaryRow label="Shipping"  value={shippingMethods.join(' + ')} />
           </View>
@@ -720,7 +551,7 @@ function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
       <View style={styles.priceWidgetBody}>
         <PriceRow step="1" label="Your guaranteed payout"      value={fmtRands(b.sellerPayoutCents)} />
         <PriceRow step="2" label="+ School delivery fee"       value={fmtRands(b.subtotalCents)}     sub={`+${fmtRands(b.deliveryFeeCents)}`} />
-        <PriceRow step="3" label="÷ (1-8%) NextKid markup"     value={fmtRands(b.afterMarkupCents)}  sub={`+${fmtRands(b.platformFeeCents)}`}  muted />
+        <PriceRow step="3" label="÷ (1-7.5%) NextKid markup"   value={fmtRands(b.afterMarkupCents)}  sub={`+${fmtRands(b.platformFeeCents)}`}  muted />
         <PriceRow step="4" label="÷ (1-2.5%) Stitch fee"       value={fmtRands(b.buyerRawCents)}     sub={`+${fmtRands(b.gatewayFeeCents)}`}   muted />
         <View style={styles.priceWidgetDivider} />
         <PriceRow step="5" label="Round UP to nearest R25"     value={fmtRands(b.buyerPriceCents)}   highlight />
@@ -736,7 +567,7 @@ function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
           <Text style={styles.priceFooterValueSm}>{fmtRands(b.sellerPayoutCents)}</Text>
         </View>
       </View>
-      <Text style={styles.priceWidgetNote}>8% markup is for testing only — will be updated before going live</Text>
+      <Text style={styles.priceWidgetNote}>7.5% markup is for testing only — will be updated before going live</Text>
     </View>
   );
 }
@@ -788,6 +619,7 @@ const styles = StyleSheet.create({
     backgroundColor: SURF, borderWidth: 1, borderColor: BORDER,
     borderRadius: 12, padding: 12, color: '#111', fontSize: 14, marginBottom: 4,
   },
+  charCount:          { color: '#979797', fontSize: 11, textAlign: 'right', marginBottom: 4 },
   categoryGrid:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   categoryCard:       { width: '47%', padding: 14, borderRadius: 14, backgroundColor: SURF, borderWidth: 1.5, borderColor: BORDER },
   categoryCardActive: { borderColor: BLUE, backgroundColor: '#eef0fb' },
@@ -833,25 +665,6 @@ const styles = StyleSheet.create({
   successBox:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   successTitle:       { color: '#111', fontSize: 26, fontWeight: '800', marginBottom: 8 },
   successSub:         { color: '#979797', fontSize: 14, marginBottom: 32, textAlign: 'center' },
-
-  // Multi-item toggle
-  multiToggleRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, backgroundColor: SURF, borderRadius: 14, borderWidth: 1, borderColor: BORDER, marginBottom: 4 },
-  multiToggleTitle: { color: '#111', fontSize: 13, fontWeight: '600', marginBottom: 2 },
-  multiToggleSub:   { color: '#979797', fontSize: 11, lineHeight: 16 },
-  toggle:           { width: 44, height: 24, borderRadius: 12, backgroundColor: BORDER, justifyContent: 'center', paddingHorizontal: 3, flexShrink: 0 },
-  toggleOn:         { backgroundColor: BLUE },
-  toggleThumb:      { width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
-  toggleThumbOn:    { alignSelf: 'flex-end' },
-
-  // Per-item cards
-  itemCard:       { borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14, marginBottom: 10, backgroundColor: '#fff' },
-  itemCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  itemCardNum:    { color: '#979797', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
-  addItemBtn:     { borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: BLUE, borderRadius: 14, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
-  addItemBtnText: { color: BLUE, fontSize: 13, fontWeight: '600' },
-  itemsSummary:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: SURF, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
-  itemsSummaryText:  { color: '#979797', fontSize: 12 },
-  itemsSummaryTotal: { color: BLUE, fontSize: 14, fontWeight: '700' },
 
   // Buyer price widget
   priceWidget:           { marginTop: 10, marginBottom: 8, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: SURF, overflow: 'hidden' },

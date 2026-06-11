@@ -26,11 +26,17 @@ export async function GET(req: NextRequest) {
   // Fetch listing's seller school
   const { data: listing } = await server
     .from('listings')
-    .select('seller_id, seller_school_id, seller_school_name')
+    .select('seller_id, seller_school_id, seller_school_name, shipping_methods')
     .eq('id', listingId)
     .single()
 
   if (!listing?.seller_school_id) {
+    return NextResponse.json({ match: false })
+  }
+
+  // RULE: seller must opt in to school drop-off for this listing
+  const shippingMethods: string[] = listing.shipping_methods ?? []
+  if (!shippingMethods.includes('SCHOOL_DROPOFF')) {
     return NextResponse.json({ match: false })
   }
 

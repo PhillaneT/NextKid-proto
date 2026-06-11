@@ -16,7 +16,7 @@
 
 export interface PricingConfig {
   deliveryFeeRands: number   // Fixed school delivery fee added to seller price (e.g. 20)
-  platformRate:     number   // NextKid markup grossed up e.g. 0.08 (testing) → change on live
+  platformRate:     number   // NextKid markup grossed up e.g. 0.075 (testing) → change on live
   gatewayRate:      number   // Stitch fee grossed up e.g. 0.025
   roundTo:          number   // Round up to nearest e.g. 25
 }
@@ -37,11 +37,11 @@ export interface PriceBreakdown {
 
 /**
  * Default config — matches the Praesignis Finance calculation sheet.
- * platformRate 8% is for TESTING ONLY — update before going live.
+ * platformRate 7.5% is for TESTING ONLY — update before going live.
  */
 export const DEFAULT_PRICING: PricingConfig = {
   deliveryFeeRands: 20,     // R20 fixed school delivery fee
-  platformRate:     0.08,   // 8% NextKid markup (testing — change on live)
+  platformRate:     0.075,  // 7.5% NextKid markup (testing — change on live)
   gatewayRate:      0.025,  // 2.5% Stitch fee
   roundTo:          25,     // Round UP to nearest R25
 }
@@ -56,10 +56,10 @@ function roundUpTo(value: number, increment: number): number {
  * Example (R180 seller payout):
  *   Step 1: R180.00  (seller payout)
  *   Step 2: R200.00  (+ R20 delivery)
- *   Step 3: R217.39  (÷ 0.92 for 8% markup)
- *   Step 4: R222.96  (÷ 0.975 for 2.5% Stitch)
+ *   Step 3: R216.22  (÷ 0.925 for 7.5% markup)
+ *   Step 4: R221.76  (÷ 0.975 for 2.5% Stitch)
  *   Step 5: R225.00  (rounded UP to nearest R25)
- *   Step 6: R2.04    (admin fee = rounding surplus)
+ *   Step 6: R3.24    (admin fee = rounding surplus)
  */
 export function calculateBuyerPrice(
   sellerPayoutRands: number,

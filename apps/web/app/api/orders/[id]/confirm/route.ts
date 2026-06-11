@@ -46,7 +46,7 @@ export async function POST(
 
   // RULE: Commission is deducted before releasing funds to seller.
   // Rate is read from env — never hardcoded.
-  const commissionRate = parseFloat(process.env.PLATFORM_COMMISSION_RATE ?? '0.08')
+  const commissionRate = parseFloat(process.env.PLATFORM_COMMISSION_RATE ?? '0.075')
   const commissionCents = Math.round(order.item_price_cents * commissionRate)
   const sellerPayoutCents = order.item_price_cents - commissionCents
 

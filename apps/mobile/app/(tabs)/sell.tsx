@@ -65,6 +65,18 @@ export default function SellScreen() {
   const [size, setSize]               = useState('');
   const [description, setDescription] = useState('');
 
+  // Step 3 — multi-item listings (bundle of separately-priced items)
+  type ItemDraft = { key: string; name: string; price: string; size_label: string };
+  const [isMultiItem, setIsMultiItem] = useState(false);
+  const [draftItems, setDraftItems]   = useState<ItemDraft[]>([
+    { key: Math.random().toString(36), name: '', price: '', size_label: '' },
+  ]);
+  const addDraftItem    = () => setDraftItems(prev => [...prev, { key: Math.random().toString(36), name: '', price: '', size_label: '' }]);
+  const removeDraftItem = (key: string) => setDraftItems(prev => prev.filter(i => i.key !== key));
+  const updateDraftItem = (key: string, field: keyof ItemDraft, value: string) =>
+    setDraftItems(prev => prev.map(i => i.key === key ? { ...i, [field]: value } : i));
+  const validItems = draftItems.filter(i => i.name.trim() && parseFloat(i.price) > 0);
+
   // Step 4 — parcel dimensions + shipping methods
   const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
   const [shippingMethods, setShippingMethods] = useState<SellerShippingOption[]>([]);
@@ -84,10 +96,9 @@ export default function SellScreen() {
   // School drop-off only makes sense if this listing is tied to a school
   const hasSchoolContext = selectedSchool !== null || profileSchools.length > 0;
 
-  const toggleShipping = (method: SellerShippingOption) =>
-    setShippingMethods(prev =>
-      prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
-    );
+  // RULE: sellers choose exactly one shipping method (radio-style, not multi-select)
+  const selectShipping = (method: SellerShippingOption) =>
+    setShippingMethods([method]);
 
   useState(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -131,16 +142,18 @@ export default function SellScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!price) { Alert.alert('Missing fields', 'Price is required.'); return; }
+    if (!isMultiItem && !price) { Alert.alert('Missing fields', 'Price is required.'); return; }
+    if (isMultiItem && validItems.length === 0) { Alert.alert('Missing items', 'Add at least one item with a name and price.'); return; }
     if (!parcelComplete || !shippingComplete) {
       Alert.alert('Incomplete', 'Please fill in parcel dimensions and select at least one shipping method.');
       return;
     }
 
-    const priceCents = Math.round(parseFloat(price) * 100);
-
-    if (isNaN(priceCents) || priceCents <= 0) {
-      Alert.alert('Invalid price', 'Enter a valid price.'); return;
+    if (!isMultiItem) {
+      const priceCents = Math.round(parseFloat(price) * 100);
+      if (isNaN(priceCents) || priceCents <= 0) {
+        Alert.alert('Invalid price', 'Enter a valid price.'); return;
+      }
     }
 
     setLoading(true);
@@ -151,7 +164,11 @@ export default function SellScreen() {
       .select('province, city_id, city_name, suburb_id, suburb_name, school_id, school_name')
       .eq('id', user.id).single();
 
-    const sellerPayoutRands = parseFloat(price);
+    // price_cents stores the BUYER price (gross-up) so listing cards show what the buyer pays.
+    // RULE: for multi-item listings, price_cents reflects the cheapest item ("from R...")
+    const sellerPayoutRands = isMultiItem
+      ? Math.min(...validItems.map(i => parseFloat(i.price)))
+      : parseFloat(price);
     const buyerPriceCents = calculateBuyerPrice(sellerPayoutRands).buyerPriceCents;
 
     const { data: newListing, error } = await supabase.from('listings').insert({
@@ -182,9 +199,26 @@ export default function SellScreen() {
       parcel_height_cm:     parcelDims!.heightCm,
       parcel_weight_kg:     parcelDims!.weightKg,
       shipping_methods:     shippingMethods,
+
+      // Multi-item listings — see "Multi-Item Listings, Reservations & Order Items"
+      is_multi_item:        isMultiItem,
+      item_count:           isMultiItem ? validItems.length : 1,
+      available_count:      isMultiItem ? validItems.length : 1,
     }).select('id').single();
 
     if (error || !newListing) { setLoading(false); Alert.alert('Error', error?.message ?? 'Unknown error'); return; }
+
+    if (isMultiItem && validItems.length > 0) {
+      const { error: itemsError } = await supabase.from('listing_items').insert(
+        validItems.map(i => ({
+          listing_id:  newListing.id,
+          name:        i.name.trim(),
+          price_cents: Math.round(parseFloat(i.price) * 100),
+          size_label:  i.size_label.trim() || null,
+        }))
+      );
+      if (itemsError) { setLoading(false); Alert.alert('Error saving items', itemsError.message); return; }
+    }
 
     setLoading(false);
     setSuccess(true);
@@ -194,6 +228,7 @@ export default function SellScreen() {
     setStep(1); setCategory(''); setSelectedSchool(null); setProvince('');
     setPrice(''); setSize(''); setDescription('');
     setSubcategory(''); setCondition('good');
+    setIsMultiItem(false); setDraftItems([{ key: Math.random().toString(36), name: '', price: '', size_label: '' }]);
     setParcel({ l: '', w: '', h: '', weight: '' }); setShippingMethods([]);
     setSuccess(false);
   };
@@ -334,6 +369,19 @@ export default function SellScreen() {
         {step === 3 && <>
           <Text style={styles.stepTitle}>Item details</Text>
 
+          {/* Multi-item toggle — choose first, before filling anything else */}
+          <View style={styles.multiToggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.multiToggleTitle}>Multiple items in this listing?</Text>
+              <Text style={styles.multiToggleSub}>e.g. shoes, shirt and pants — each priced separately</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.toggle, isMultiItem && styles.toggleOn]}
+              onPress={() => setIsMultiItem(v => !v)}>
+              <View style={[styles.toggleThumb, isMultiItem && styles.toggleThumbOn]} />
+            </TouchableOpacity>
+          </View>
+
           <Text style={styles.label}>Subcategory</Text>
           <View style={styles.chipRow}>
             {category && SUBCATEGORIES[category as ListingCategory].map(s => (
@@ -373,10 +421,61 @@ export default function SellScreen() {
               placeholder="e.g. Size 32, UK 8, Grade 5" placeholderTextColor="#979797" />
           )}
 
-          <Text style={styles.label}>Price (R) *</Text>
-          <TextInput style={styles.input} value={price} onChangeText={setPrice}
-            placeholder="250" placeholderTextColor="#979797" keyboardType="numeric" />
-          {parseFloat(price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(price)} />}
+          {/* Single item: price + buyer price calculator */}
+          {!isMultiItem && (
+            <>
+              <Text style={styles.label}>Price (R) *</Text>
+              <TextInput style={styles.input} value={price} onChangeText={setPrice}
+                placeholder="250" placeholderTextColor="#979797" keyboardType="numeric" />
+              {parseFloat(price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(price)} />}
+            </>
+          )}
+
+          {/* Multi-item: per-item list */}
+          {isMultiItem && (
+            <>
+              <Text style={styles.label}>Items in this listing <Text style={{ color: '#979797', fontWeight: '400' }}>(at least 1)</Text></Text>
+              {draftItems.map((item, idx) => (
+                <View key={item.key} style={styles.itemCard}>
+                  <View style={styles.itemCardHeader}>
+                    <Text style={styles.itemCardNum}>Item {idx + 1}</Text>
+                    {draftItems.length > 1 && (
+                      <TouchableOpacity onPress={() => removeDraftItem(item.key)} hitSlop={8}>
+                        <Text style={{ color: '#979797', fontSize: 18, lineHeight: 20 }}>×</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <Text style={styles.label}>Name *</Text>
+                  <TextInput style={styles.input} value={item.name}
+                    onChangeText={v => updateDraftItem(item.key, 'name', v)}
+                    placeholder="e.g. Grey school trousers" placeholderTextColor="#979797" />
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Price (R) *</Text>
+                      <TextInput style={styles.input} value={item.price}
+                        onChangeText={v => updateDraftItem(item.key, 'price', v)}
+                        placeholder="80" placeholderTextColor="#979797" keyboardType="numeric" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Size <Text style={{ color: '#979797', fontWeight: '400' }}>(optional)</Text></Text>
+                      <TextInput style={styles.input} value={item.size_label}
+                        onChangeText={v => updateDraftItem(item.key, 'size_label', v)}
+                        placeholder="e.g. Size 32" placeholderTextColor="#979797" />
+                    </View>
+                  </View>
+                </View>
+              ))}
+              <TouchableOpacity style={styles.addItemBtn} onPress={addDraftItem}>
+                <Text style={styles.addItemBtnText}>+ Add another item</Text>
+              </TouchableOpacity>
+              {validItems.length > 0 && (
+                <View style={styles.itemsSummary}>
+                  <Text style={styles.itemsSummaryText}>{validItems.length} item{validItems.length !== 1 ? 's' : ''} · from R{Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}</Text>
+                  <Text style={styles.itemsSummaryTotal}>Total R{validItems.reduce((s, i) => s + parseFloat(i.price), 0).toFixed(2)}</Text>
+                </View>
+              )}
+            </>
+          )}
 
           <Text style={styles.label}>Description (optional)</Text>
           <TextInput style={[styles.input, { height: 90, textAlignVertical: 'top' }]}
@@ -390,9 +489,9 @@ export default function SellScreen() {
               <Text style={styles.btnOutlineText}>← Back</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.btn, !price && styles.btnDisabled, { flex: 2 }]}
+              style={[styles.btn, (isMultiItem ? validItems.length === 0 : !price) && styles.btnDisabled, { flex: 2 }]}
               onPress={nextStep}
-              disabled={!price}>
+              disabled={isMultiItem ? validItems.length === 0 : !price}>
               <Text style={styles.btnText}>Continue →</Text>
             </TouchableOpacity>
           </View>
@@ -441,12 +540,12 @@ export default function SellScreen() {
 
           {/* Shipping method cards */}
           <Text style={[styles.label, { marginTop: 16 }]}>
-            Shipping methods <Text style={{ color: '#979797', fontWeight: '400' }}>(select at least one)</Text>
+            Shipping method <Text style={{ color: '#979797', fontWeight: '400' }}>(select one)</Text>
           </Text>
 
           {/* Door-to-Door — always available */}
           <TouchableOpacity
-            onPress={() => toggleShipping('PICKUP')}
+            onPress={() => selectShipping('PICKUP')}
             style={[styles.shippingCard, shippingMethods.includes('PICKUP') && styles.shippingCardActive]}>
             <Text style={styles.shippingIcon}>🚚</Text>
             <View style={{ flex: 1 }}>
@@ -458,7 +557,7 @@ export default function SellScreen() {
 
           {/* PUDO Locker — only if parcel fits */}
           <TouchableOpacity
-            onPress={() => fitsInLocker && toggleShipping('PUDO_DROPOFF')}
+            onPress={() => fitsInLocker && selectShipping('PUDO_DROPOFF')}
             disabled={parcelComplete && !fitsInLocker}
             style={[
               styles.shippingCard,
@@ -483,7 +582,7 @@ export default function SellScreen() {
           {/* School drop-off — only shown if this listing is tied to a school */}
           {hasSchoolContext && (
             <TouchableOpacity
-              onPress={() => toggleShipping('SCHOOL_DROPOFF')}
+              onPress={() => selectShipping('SCHOOL_DROPOFF')}
               style={[styles.shippingCard, shippingMethods.includes('SCHOOL_DROPOFF') && styles.shippingCardActive]}>
               <Text style={styles.shippingIcon}>🏫</Text>
               <View style={{ flex: 1 }}>
@@ -516,10 +615,13 @@ export default function SellScreen() {
             <SummaryRow label="Category"  value={category} />
             {selectedSchool && <SummaryRow label="School" value={selectedSchool.name} />}
             <SummaryRow label="Listing title" value={buildListingTitle(category, subcategory, size)} />
-            <SummaryRow label="Price"     value={`R${price}`} />
+            {isMultiItem
+              ? <SummaryRow label="Items" value={`${validItems.length} items · from R${Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}`} />
+              : <SummaryRow label="Price" value={`R${price}`} />
+            }
             {subcategory && <SummaryRow label="Subcategory" value={subcategory} />}
             <SummaryRow label="Condition" value={condition.charAt(0).toUpperCase() + condition.slice(1)} />
-            {size && <SummaryRow label="Size" value={size} />}
+            {!isMultiItem && size && <SummaryRow label="Size" value={size} />}
             {description && <SummaryRow label="Description" value={description} />}
             <SummaryRow label="Parcel"    value={`${parcel.l}×${parcel.w}×${parcel.h} cm · ${parcel.weight} kg`} />
             <SummaryRow label="Shipping"  value={shippingMethods.join(' + ')} />
@@ -540,53 +642,18 @@ export default function SellScreen() {
   );
 }
 
+// RULE: sellers only see the final totals — never the fee/markup breakdown
 function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
   const b = calculateBuyerPrice(sellerRands);
   return (
-    <View style={styles.priceWidget}>
-      <View style={styles.priceWidgetHeader}>
-        <Text style={styles.priceWidgetTitle}>What the buyer pays</Text>
-        <Text style={styles.priceWidgetSub}>Gross-up formula</Text>
+    <View style={styles.priceWidgetFooter}>
+      <View>
+        <Text style={styles.priceFooterLabel}>Buyer pays</Text>
+        <Text style={styles.priceFooterValue}>{fmtRands(b.buyerPriceCents)}</Text>
       </View>
-      <View style={styles.priceWidgetBody}>
-        <PriceRow step="1" label="Your guaranteed payout"      value={fmtRands(b.sellerPayoutCents)} />
-        <PriceRow step="2" label="+ School delivery fee"       value={fmtRands(b.subtotalCents)}     sub={`+${fmtRands(b.deliveryFeeCents)}`} />
-        <PriceRow step="3" label="÷ (1-7.5%) NextKid markup"   value={fmtRands(b.afterMarkupCents)}  sub={`+${fmtRands(b.platformFeeCents)}`}  muted />
-        <PriceRow step="4" label="÷ (1-2.5%) Stitch fee"       value={fmtRands(b.buyerRawCents)}     sub={`+${fmtRands(b.gatewayFeeCents)}`}   muted />
-        <View style={styles.priceWidgetDivider} />
-        <PriceRow step="5" label="Round UP to nearest R25"     value={fmtRands(b.buyerPriceCents)}   highlight />
-        <PriceRow step="6" label="Admin fee (rounding surplus)" value={fmtRands(b.adminFeeCents)}    muted />
-      </View>
-      <View style={styles.priceWidgetFooter}>
-        <View>
-          <Text style={styles.priceFooterLabel}>Buyer pays</Text>
-          <Text style={styles.priceFooterValue}>{fmtRands(b.buyerPriceCents)}</Text>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={styles.priceFooterLabel}>You receive</Text>
-          <Text style={styles.priceFooterValueSm}>{fmtRands(b.sellerPayoutCents)}</Text>
-        </View>
-      </View>
-      <Text style={styles.priceWidgetNote}>7.5% markup is for testing only — will be updated before going live</Text>
-    </View>
-  );
-}
-
-function PriceRow({ step, label, value, sub, muted, highlight }: {
-  step: string; label: string; value: string;
-  sub?: string; muted?: boolean; highlight?: boolean;
-}) {
-  return (
-    <View style={styles.priceRow}>
-      <View style={styles.priceStepBadge}>
-        <Text style={styles.priceStepText}>{step}</Text>
-      </View>
-      <Text style={[styles.priceRowLabel, muted && styles.priceRowLabelMuted]} numberOfLines={1}>{label}</Text>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[styles.priceRowValue, highlight && styles.priceRowValueHighlight, muted && styles.priceRowValueMuted]}>
-          {value}
-        </Text>
-        {sub && <Text style={styles.priceRowSub}>({sub})</Text>}
+        <Text style={styles.priceFooterLabel}>You receive</Text>
+        <Text style={styles.priceFooterValueSm}>{fmtRands(b.sellerPayoutCents)}</Text>
       </View>
     </View>
   );
@@ -666,25 +733,28 @@ const styles = StyleSheet.create({
   successTitle:       { color: '#111', fontSize: 26, fontWeight: '800', marginBottom: 8 },
   successSub:         { color: '#979797', fontSize: 14, marginBottom: 32, textAlign: 'center' },
 
-  // Buyer price widget
-  priceWidget:           { marginTop: 10, marginBottom: 8, borderRadius: 14, borderWidth: 1, borderColor: BORDER, backgroundColor: SURF, overflow: 'hidden' },
-  priceWidgetHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: '#fff' },
-  priceWidgetTitle:      { color: '#979797', fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
-  priceWidgetSub:        { color: '#979797', fontSize: 9 },
-  priceWidgetBody:       { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4, gap: 7 },
-  priceWidgetDivider:    { height: 1, backgroundColor: BORDER, marginVertical: 3 },
-  priceWidgetFooter:     { margin: 10, backgroundColor: BLUE, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  priceWidgetNote:       { color: '#979797', fontSize: 9, textAlign: 'center', paddingBottom: 10 },
-  priceFooterLabel:      { color: 'rgba(255,255,255,0.7)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1 },
-  priceFooterValue:      { color: '#fff', fontSize: 18, fontWeight: '800' },
-  priceFooterValueSm:    { color: '#fff', fontSize: 14, fontWeight: '600' },
-  priceRow:              { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  priceStepBadge:        { width: 16, height: 16, borderRadius: 8, backgroundColor: BORDER, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  priceStepText:         { color: '#555', fontSize: 7, fontWeight: '700' },
-  priceRowLabel:         { flex: 1, color: '#555', fontSize: 10 },
-  priceRowLabelMuted:    { color: '#979797' },
-  priceRowValue:         { color: '#111', fontSize: 10, fontWeight: '600' },
-  priceRowValueHighlight:{ color: BLUE },
-  priceRowValueMuted:    { color: '#979797' },
-  priceRowSub:           { color: '#979797', fontSize: 8 },
+  // Multi-item toggle
+  multiToggleRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, backgroundColor: SURF, borderRadius: 14, borderWidth: 1, borderColor: BORDER, marginBottom: 4 },
+  multiToggleTitle: { color: '#111', fontSize: 13, fontWeight: '600', marginBottom: 2 },
+  multiToggleSub:   { color: '#979797', fontSize: 11, lineHeight: 16 },
+  toggle:           { width: 44, height: 24, borderRadius: 12, backgroundColor: BORDER, justifyContent: 'center', paddingHorizontal: 3, flexShrink: 0 },
+  toggleOn:         { backgroundColor: BLUE },
+  toggleThumb:      { width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
+  toggleThumbOn:    { alignSelf: 'flex-end' },
+
+  // Per-item cards (multi-item listings)
+  itemCard:       { borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 14, marginBottom: 10, backgroundColor: '#fff' },
+  itemCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  itemCardNum:    { color: '#979797', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+  addItemBtn:     { borderWidth: 1.5, borderStyle: 'dashed', borderColor: BLUE, borderRadius: 14, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
+  addItemBtnText: { color: BLUE, fontSize: 13, fontWeight: '600' },
+  itemsSummary:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: SURF, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  itemsSummaryText:  { color: '#979797', fontSize: 12 },
+  itemsSummaryTotal: { color: BLUE, fontSize: 14, fontWeight: '700' },
+
+  // Buyer price widget — totals only, no fee breakdown
+  priceWidgetFooter:  { marginTop: 10, marginBottom: 8, backgroundColor: BLUE, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  priceFooterLabel:   { color: 'rgba(255,255,255,0.7)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1 },
+  priceFooterValue:   { color: '#fff', fontSize: 18, fontWeight: '800' },
+  priceFooterValueSm: { color: '#fff', fontSize: 14, fontWeight: '600' },
 });

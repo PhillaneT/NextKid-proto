@@ -169,8 +169,7 @@ function QrPanel({
 // Calls /api/orders/:id/pay → receives a Stitch-hosted checkout URL → redirects
 // the buyer. Order stays PENDING_PAYMENT until the Stitch webhook confirms.
 
-function StitchPaymentPanel({ order }: { order: Order }) {
-  const router = useRouter();
+function StitchPaymentPanel({ order, onSimulated }: { order: Order; onSimulated: () => Promise<void> }) {
   const [initiating, setInitiating] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [error, setError]           = useState('');
@@ -193,7 +192,9 @@ function StitchPaymentPanel({ order }: { order: Order }) {
       setSimulating(false);
       return;
     }
-    router.refresh();
+    // Re-fetch the order in place — status flips to AWAITING_DROPOFF, which
+    // immediately swaps this panel for the "Payment held safely" card below.
+    await onSimulated();
   }
 
   async function handlePay() {
@@ -257,34 +258,38 @@ function StitchPaymentPanel({ order }: { order: Order }) {
         </div>
       )}
 
-      {/* Pay button */}
-      <button
-        onClick={handlePay}
-        disabled={initiating}
-        className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white font-bold rounded-full transition flex items-center justify-center gap-2 text-base"
-      >
-        {initiating ? (
-          <>
-            <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            Redirecting to Stitch…
-          </>
-        ) : (
-          <>
-            <Lock size={16} strokeWidth={2.5} />
-            Pay {fmt(order.total_paid_cents)} with Stitch
-          </>
-        )}
-      </button>
+      {/* Pay button — hidden on localhost/ngrok, where Simulate is the test path */}
+      {!isTestEnv && (
+        <>
+          <button
+            onClick={handlePay}
+            disabled={initiating}
+            className="w-full py-4 bg-[#BE1E2D] hover:bg-[#9B1824] disabled:bg-[#dedede] text-white font-bold rounded-full transition flex items-center justify-center gap-2 text-base"
+          >
+            {initiating ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                Redirecting to Stitch…
+              </>
+            ) : (
+              <>
+                <Lock size={16} strokeWidth={2.5} />
+                Pay {fmt(order.total_paid_cents)} with Stitch
+              </>
+            )}
+          </button>
 
-      <div className="flex flex-col items-center gap-1 pt-1">
-        <div className="flex items-center gap-1.5">
-          <ShieldCheck size={13} strokeWidth={2} className="text-[#979797]" />
-          <p className="text-xs text-[#979797]">Secured by Stitch · Released only after you confirm receipt</p>
-        </div>
-        <p className="text-[11px] text-[#c0c0c0]">
-          You will be redirected to Stitch to complete payment via instant EFT or card.
-        </p>
-      </div>
+          <div className="flex flex-col items-center gap-1 pt-1">
+            <div className="flex items-center gap-1.5">
+              <ShieldCheck size={13} strokeWidth={2} className="text-[#979797]" />
+              <p className="text-xs text-[#979797]">Secured by Stitch · Released only after you confirm receipt</p>
+            </div>
+            <p className="text-[11px] text-[#c0c0c0]">
+              You will be redirected to Stitch to complete payment via instant EFT or card.
+            </p>
+          </div>
+        </>
+      )}
 
       {/* Test mode only — simulate payment without real money */}
       {isTestEnv && (
@@ -508,7 +513,7 @@ export default function OrderDetailPage() {
 
         {/* PENDING_PAYMENT: Stitch payment */}
         {isPending && (
-          <StitchPaymentPanel order={order} />
+          <StitchPaymentPanel order={order} onSimulated={load} />
         )}
 
         {/* AWAITING_DROPOFF: seller sees DROP-OFF QR, buyer sees waiting message */}

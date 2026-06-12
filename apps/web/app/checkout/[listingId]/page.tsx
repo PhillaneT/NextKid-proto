@@ -64,6 +64,10 @@ export default function CheckoutPage() {
   const [deliverySchoolName, setDeliverySchoolName]  = useState<string | null>(null)
   const SCHOOL_FEE_CENTS = 2000  // R20 — matches fee_config
 
+  // Set if courier/PUDO quotes couldn't be loaded — non-fatal when school pick-up
+  // is available, since the buyer still has an immediate delivery option.
+  const [courierError, setCourierError] = useState<string | null>(null)
+
   useEffect(() => {
     async function load() {
       // 1. Get session
@@ -98,79 +102,96 @@ export default function CheckoutPage() {
       }
       setListing(listingData)
 
-      // 3. Pre-check: does the buyer have a street address?
-      // We check this client-side so the user always sees a clear, actionable
-      // message rather than a generic server error.
+      // 3. Fetch buyer profile — address + locker prefs for courier/PUDO options
       const { data: buyerProfile } = await supabase
         .from('profiles')
         .select('street_address, suburb_name, city_name, preferred_locker_id, preferred_locker_name, preferred_locker_address')
         .eq('id', session.user.id)
         .single()
 
-      if (!buyerProfile?.street_address) {
-        setErrorCode('no_delivery_address')
-        setStep('error')
-        return
-      }
-
       // Pre-populate buyer locker + location for the map
-      if (buyerProfile.suburb_name) setBuyerSuburb(buyerProfile.suburb_name)
-      if (buyerProfile.city_name) setBuyerCity(buyerProfile.city_name)
-      if (buyerProfile.preferred_locker_id) {
+      if (buyerProfile?.suburb_name) setBuyerSuburb(buyerProfile.suburb_name)
+      if (buyerProfile?.city_name) setBuyerCity(buyerProfile.city_name)
+      if (buyerProfile?.preferred_locker_id) {
         setBuyerLockerId(buyerProfile.preferred_locker_id)
         setBuyerLockerName(buyerProfile.preferred_locker_name ?? '')
         setBuyerLockerAddress(buyerProfile.preferred_locker_address ?? '')
       }
 
-      // 4. Check for same-school delivery match
+      // 4. Check for same-school delivery match. School pick-up needs neither a
+      // street address nor a courier quote, so it's pre-selected and never blocks
+      // checkout — courier/PUDO options (below) still load alongside it.
+      let isSchoolMatch = false
       const matchRes = await fetch(`/api/checkout/school-match?listingId=${listingId}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
       if (matchRes.ok) {
         const matchData = await matchRes.json()
         if (matchData.match && matchData.hubActive && matchData.schools?.length > 0) {
+          isSchoolMatch = true
           setSchoolMatch(true)
           setSchoolHubActive(true)
           setMatchingSchools(matchData.schools)
-          // Pre-select school delivery with the first matching school
+          // Pre-select school pick-up with the first matching school
           setDeliveryType('school')
           setDeliverySchoolId(matchData.schools[0].id)
           setDeliverySchoolName(matchData.schools[0].name)
         }
       }
 
-      // 5. Fetch shipping quotes (for courier option)
-      const res = await fetch('/api/shipping/rates', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ listingId }),
-      })
+      let resolvedItemPriceCents = listingData.price_cents
 
-      let json: { quotes?: ShippingQuote[]; itemPriceCents?: number; error?: string; message?: string } = {}
-      try { json = await res.json() } catch { /* empty body — treat as server error */ }
-
-      if (!res.ok) {
-        const code = json.error ?? 'unknown'
-        if (code === 'profile_incomplete' || code === 'no_delivery_address') {
+      // 5. Courier/PUDO requires a saved street address. Without a school match
+      // it's the only delivery method, so a missing address blocks checkout —
+      // otherwise school pick-up remains available and this is non-fatal.
+      if (!buyerProfile?.street_address) {
+        if (!isSchoolMatch) {
           setErrorCode('no_delivery_address')
           setStep('error')
           return
         }
-        setErrorCode(code)
-        setErrorMessage(json.message ?? null)
-        setStep('error')
-        return
+        setCourierError('Add a delivery address in your profile to see courier delivery options.')
+      } else {
+        // 6. Fetch courier/PUDO quotes — shown alongside school pick-up so the
+        // buyer can compare. If a school match exists, a failure here is
+        // non-fatal since pick-up is still immediately available.
+        const res = await fetch('/api/shipping/rates', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ listingId }),
+        })
+
+        let json: { quotes?: ShippingQuote[]; itemPriceCents?: number; error?: string; message?: string } = {}
+        try { json = await res.json() } catch { /* empty body — treat as server error */ }
+
+        if (!res.ok) {
+          if (!isSchoolMatch) {
+            const code = json.error ?? 'unknown'
+            if (code === 'profile_incomplete' || code === 'no_delivery_address') {
+              setErrorCode('no_delivery_address')
+              setStep('error')
+              return
+            }
+            setErrorCode(code)
+            setErrorMessage(json.message ?? null)
+            setStep('error')
+            return
+          }
+          setCourierError(json.message ?? 'Courier delivery is unavailable for this item right now.')
+        } else {
+          const fetchedQuotes = json.quotes ?? []
+          setQuotes(fetchedQuotes)
+          resolvedItemPriceCents = json.itemPriceCents ?? listingData.price_cents
+          if (fetchedQuotes.length > 0) {
+            setSelectedQuoteId(fetchedQuotes[0].quoteId)
+          }
+        }
       }
 
-      const fetchedQuotes = json.quotes ?? []
-      setQuotes(fetchedQuotes)
-      setItemPriceCents(json.itemPriceCents ?? listingData.price_cents)
-      if (fetchedQuotes.length > 0) {
-        setSelectedQuoteId(fetchedQuotes[0].quoteId)
-      }
+      setItemPriceCents(resolvedItemPriceCents)
       setStep('selecting')
     }
 
@@ -178,6 +199,9 @@ export default function CheckoutPage() {
   }, [listingId, router])
 
   const selectedQuote  = quotes.find((q) => q.quoteId === selectedQuoteId) ?? null
+  // Group courier/PUDO quotes by whether the buyer collects (locker) or it's delivered to their door
+  const pickupQuotes   = quotes.filter((q) => q.method === 'D2L' || q.method === 'L2L')
+  const deliveryQuotes = quotes.filter((q) => q.method === 'D2D' || q.method === 'L2D')
   // School delivery costs R20 flat; courier costs come from TCG quote
   const shippingCents  = deliveryType === 'school' ? SCHOOL_FEE_CENTS : (selectedQuote ? Math.round(selectedQuote.rate * 100) : 0)
   const totalCents     = itemPriceCents + shippingCents
@@ -233,7 +257,57 @@ export default function CheckoutPage() {
       return
     }
 
-    router.push(`/orders/${json.orderId}`)
+    router.push('/orders')
+  }
+
+  const METHOD_LABELS: Record<string, string> = {
+    D2D: 'Door-to-door delivery',
+    D2L: 'PUDO locker delivery',
+    L2D: 'PUDO locker drop-off → your door',
+    L2L: 'PUDO locker to locker',
+  }
+
+  function renderQuoteCard(quote: ShippingQuote) {
+    const isSelected = deliveryType === 'courier' && quote.quoteId === selectedQuoteId
+    const isLocker = quote.method === 'D2L' || quote.method === 'L2D' || quote.method === 'L2L'
+    const methodLabel = METHOD_LABELS[quote.method] ?? quote.method
+
+    return (
+      <button
+        key={quote.quoteId}
+        onClick={() => { setDeliveryType('courier'); setSelectedQuoteId(quote.quoteId) }}
+        style={{
+          width: '100%',
+          background: '#fff',
+          border: `2px solid ${isSelected ? '#BE1E2D' : '#e0e0e0'}`,
+          borderRadius: '16px',
+          padding: '16px 20px',
+          marginBottom: '10px',
+          cursor: 'pointer',
+          textAlign: 'left',
+          transition: 'border-color 0.15s',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {isLocker ? <MapPin size={18} color={isSelected ? '#BE1E2D' : '#888'} /> : <Truck size={18} color={isSelected ? '#BE1E2D' : '#888'} />}
+            <div>
+              <p style={{ fontWeight: 600, fontSize: '14px', color: isSelected ? '#BE1E2D' : '#1a1a2e', margin: 0 }}>
+                {methodLabel} <span style={{ fontWeight: 400, color: '#888' }}>({quote.serviceLevelName})</span>
+              </p>
+              <p style={{ fontSize: '12px', color: '#888', margin: '2px 0 0' }}>
+                Est. {formatDateRange(quote.estimatedDeliveryFrom, quote.estimatedDeliveryTo)}
+                {quote.collectionLockerName ? ` · Seller drops at: ${quote.collectionLockerName}` : ''}
+                {quote.deliveryLockerName ? ` · You collect at: ${quote.deliveryLockerName}` : ''}
+              </p>
+            </div>
+          </div>
+          <p style={{ fontWeight: 700, fontSize: '15px', color: isSelected ? '#BE1E2D' : '#1a1a2e', margin: 0, flexShrink: 0, marginLeft: '12px' }}>
+            {formatRandFloat(quote.rate)}
+          </p>
+        </div>
+      </button>
+    )
   }
 
   // ─── Error state ──────────────────────────────────────────────────────────
@@ -370,12 +444,12 @@ export default function CheckoutPage() {
           </div>
         )}
 
-        {/* ── School delivery option (shown when buyer & seller share a school) ── */}
-        {schoolMatch && schoolHubActive && (
-          <div className="mb-4">
-            <p className="text-xs font-semibold text-[#979797] uppercase tracking-wide mb-2">Delivery method</p>
+        {/* ── Pick-up options: school pick-up + any PUDO locker quotes ── */}
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-[#979797] uppercase tracking-wide mb-2">Pick-up options</p>
 
-            {/* School delivery card */}
+          {/* School pick-up card (shown when buyer & seller share a school) */}
+          {schoolMatch && schoolHubActive && (
             <button
               onClick={() => setDeliveryType('school')}
               className={`w-full text-left p-4 rounded-2xl border-2 mb-2 transition ${
@@ -388,7 +462,7 @@ export default function CheckoutPage() {
                     <School size={15} strokeWidth={2} className={deliveryType === 'school' ? 'text-white' : 'text-[#979797]'} />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-[#111]">School drop-off — R20</p>
+                    <p className="text-sm font-semibold text-[#111]">School pick-up — R20</p>
                     <p className="text-xs text-[#979797] mt-0.5">Collect from {deliverySchoolName ?? matchingSchools[0]?.name}</p>
                   </div>
                 </div>
@@ -413,89 +487,31 @@ export default function CheckoutPage() {
                 </div>
               )}
             </button>
+          )}
 
-            {/* Courier option toggle */}
-            <button
-              onClick={() => setDeliveryType('courier')}
-              className={`w-full text-left p-4 rounded-2xl border-2 transition ${
-                deliveryType === 'courier' ? 'border-[#BE1E2D] bg-red-50' : 'border-[#dedede] bg-white hover:border-[#BE1E2D]/40'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${deliveryType === 'courier' ? 'bg-[#BE1E2D]' : 'bg-[#f4f4f4]'}`}>
-                  <Truck size={15} strokeWidth={2} className={deliveryType === 'courier' ? 'text-white' : 'text-[#979797]'} />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-[#111]">Courier delivery</p>
-                  <p className="text-xs text-[#979797] mt-0.5">Door-to-door or PUDO locker — see options below</p>
-                </div>
-              </div>
-            </button>
-          </div>
-        )}
+          {/* PUDO locker quotes — buyer collects from a locker (D2L, L2L) */}
+          {pickupQuotes.map(renderQuoteCard)}
 
-        {/* Shipping options — only shown when courier selected or no school match */}
-        {(deliveryType === 'courier' || !schoolMatch) && (
-        <div style={{ marginBottom: '16px' }}>
-          <p style={{ fontSize: '13px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
-            {schoolMatch ? 'Courier options' : 'Shipping options'}
-          </p>
-          {quotes.length === 0 ? (
+          {!(schoolMatch && schoolHubActive) && pickupQuotes.length === 0 && (
             <div style={{ background: '#fff', borderRadius: '16px', padding: '20px', textAlign: 'center', color: '#888' }}>
-              No shipping options available.
+              {courierError ?? 'No pick-up options available.'}
             </div>
-          ) : (
-            quotes.map((quote) => {
-              const isSelected = quote.quoteId === selectedQuoteId
-              const isLocker = quote.method === 'D2L' || quote.method === 'L2D' || quote.method === 'L2L'
-              const METHOD_LABELS: Record<string, string> = {
-                D2D: 'Door-to-door delivery',
-                D2L: 'PUDO locker delivery',
-                L2D: 'PUDO locker drop-off → your door',
-                L2L: 'PUDO locker to locker',
-              }
-              const methodLabel = METHOD_LABELS[quote.method] ?? quote.method
-
-              return (
-                <button
-                  key={quote.quoteId}
-                  onClick={() => setSelectedQuoteId(quote.quoteId)}
-                  style={{
-                    width: '100%',
-                    background: '#fff',
-                    border: `2px solid ${isSelected ? '#BE1E2D' : '#e0e0e0'}`,
-                    borderRadius: '16px',
-                    padding: '16px 20px',
-                    marginBottom: '10px',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'border-color 0.15s',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      {isLocker ? <MapPin size={18} color={isSelected ? '#BE1E2D' : '#888'} /> : <Truck size={18} color={isSelected ? '#BE1E2D' : '#888'} />}
-                      <div>
-                        <p style={{ fontWeight: 600, fontSize: '14px', color: isSelected ? '#BE1E2D' : '#1a1a2e', margin: 0 }}>
-                          {methodLabel} <span style={{ fontWeight: 400, color: '#888' }}>({quote.serviceLevelName})</span>
-                        </p>
-                        <p style={{ fontSize: '12px', color: '#888', margin: '2px 0 0' }}>
-                          Est. {formatDateRange(quote.estimatedDeliveryFrom, quote.estimatedDeliveryTo)}
-                          {quote.collectionLockerName ? ` · Seller drops at: ${quote.collectionLockerName}` : ''}
-                          {quote.deliveryLockerName ? ` · You collect at: ${quote.deliveryLockerName}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <p style={{ fontWeight: 700, fontSize: '15px', color: isSelected ? '#BE1E2D' : '#1a1a2e', margin: 0, flexShrink: 0, marginLeft: '12px' }}>
-                      {formatRandFloat(quote.rate)}
-                    </p>
-                  </div>
-                </button>
-              )
-            })
           )}
         </div>
-        )}
+
+        {/* ── Delivery options: door-to-door courier quotes (D2D, L2D) ── */}
+        <div style={{ marginBottom: '16px' }}>
+          <p style={{ fontSize: '13px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
+            Delivery options
+          </p>
+          {deliveryQuotes.length === 0 ? (
+            <div style={{ background: '#fff', borderRadius: '16px', padding: '20px', textAlign: 'center', color: '#888' }}>
+              {courierError ?? 'No delivery options available.'}
+            </div>
+          ) : (
+            deliveryQuotes.map(renderQuoteCard)
+          )}
+        </div>
 
         {/* PUDO locker picker — appears when buyer selects a D2L or L2L quote */}
         {isPudoDelivery && buyerSuburb && (

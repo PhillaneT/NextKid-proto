@@ -72,6 +72,10 @@ export default function CheckoutScreen() {
   const [deliverySchoolName, setDeliverySchoolName] = useState<string | null>(null);
   const SCHOOL_FEE_CENTS = 2000;
 
+  // Set if courier/PUDO quotes couldn't be loaded — non-fatal when school pick-up
+  // is available, since the buyer still has an immediate delivery option.
+  const [courierError, setCourierError] = useState<string | null>(null);
+
   useEffect(() => {
     async function load() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -88,23 +92,24 @@ export default function CheckoutScreen() {
       if (listingData.seller_id === session.user.id) { setErrorCode('cannot_buy_own_item'); setStep('error'); return; }
       setListing(listingData as CheckoutListing);
 
-      // 2. Check buyer has a delivery address
+      // 2. Fetch buyer profile — address + locker prefs for courier/PUDO options
       const { data: prof } = await supabase
         .from('profiles')
         .select('street_address, suburb_name, city_name, preferred_locker_id, preferred_locker_name, preferred_locker_address')
         .eq('id', session.user.id).single();
 
-      if (!prof?.street_address) { setErrorCode('no_delivery_address'); setStep('error'); return; }
-
-      if (prof.suburb_name) setBuyerSuburb(prof.suburb_name);
-      if (prof.city_name)   setBuyerCity(prof.city_name);
-      if (prof.preferred_locker_id) {
+      if (prof?.suburb_name) setBuyerSuburb(prof.suburb_name);
+      if (prof?.city_name)   setBuyerCity(prof.city_name);
+      if (prof?.preferred_locker_id) {
         setBuyerLockerId(prof.preferred_locker_id);
         setBuyerLockerName(prof.preferred_locker_name ?? '');
         setBuyerLockerAddress(prof.preferred_locker_address ?? '');
       }
 
-      // 3. Check for same-school delivery match
+      // 3. Check for same-school delivery match. School pick-up needs neither a
+      // street address nor a courier quote, so it's pre-selected and never
+      // blocks checkout — courier/PUDO options (below) still load alongside it.
+      let isSchoolMatch = false;
       try {
         const matchRes = await fetch(`${WEB_API_BASE}/api/checkout/school-match?listingId=${listingId}`, {
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -112,6 +117,7 @@ export default function CheckoutScreen() {
         if (matchRes.ok) {
           const matchData = await matchRes.json();
           if (matchData.match && matchData.hubActive && matchData.schools?.length > 0) {
+            isSchoolMatch = true;
             setSchoolMatch(true);
             setMatchingSchools(matchData.schools);
             setDeliveryType('school');
@@ -121,26 +127,45 @@ export default function CheckoutScreen() {
         }
       } catch { /* non-fatal — fall back to courier */ }
 
-      // 4. Fetch shipping quotes from the web API
-      try {
-        const res = await fetch(`${WEB_API_BASE}/api/shipping/rates`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ listingId }),
-        });
-        const json = await res.json() as { quotes?: ShippingQuote[]; itemPriceCents?: number; error?: string };
-        if (!res.ok) { setErrorCode(json.error ?? 'unknown'); setStep('error'); return; }
-        const fetchedQuotes = json.quotes ?? [];
-        setQuotes(fetchedQuotes);
-        setItemPriceCents(json.itemPriceCents ?? listingData.price_cents);
-        if (fetchedQuotes.length > 0) setSelectedId(fetchedQuotes[0].quoteId);
-      } catch {
-        setErrorCode('shipping_unavailable'); setStep('error'); return;
+      let resolvedItemPriceCents = listingData.price_cents;
+
+      // 4. Courier/PUDO requires a saved street address. Without a school
+      // match it's the only delivery method, so a missing address blocks
+      // checkout — otherwise school pick-up remains available and this is
+      // non-fatal.
+      if (!prof?.street_address) {
+        if (!isSchoolMatch) { setErrorCode('no_delivery_address'); setStep('error'); return; }
+        setCourierError('Add a delivery address in your profile to see courier delivery options.');
+      } else {
+        // 5. Fetch courier/PUDO quotes — shown alongside school pick-up so the
+        // buyer can compare. If a school match exists, a failure here is
+        // non-fatal since pick-up is still immediately available.
+        try {
+          const res = await fetch(`${WEB_API_BASE}/api/shipping/rates`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ listingId }),
+          });
+          const json = await res.json() as { quotes?: ShippingQuote[]; itemPriceCents?: number; error?: string; message?: string };
+          if (!res.ok) {
+            if (!isSchoolMatch) { setErrorCode(json.error ?? 'unknown'); setStep('error'); return; }
+            setCourierError(json.message ?? 'Courier delivery is unavailable for this item right now.');
+          } else {
+            const fetchedQuotes = json.quotes ?? [];
+            setQuotes(fetchedQuotes);
+            resolvedItemPriceCents = json.itemPriceCents ?? listingData.price_cents;
+            if (fetchedQuotes.length > 0) setSelectedId(fetchedQuotes[0].quoteId);
+          }
+        } catch {
+          if (!isSchoolMatch) { setErrorCode('shipping_unavailable'); setStep('error'); return; }
+          setCourierError('Courier delivery is unavailable for this item right now.');
+        }
       }
 
+      setItemPriceCents(resolvedItemPriceCents);
       setStep('selecting');
     }
     load();
@@ -150,6 +175,9 @@ export default function CheckoutScreen() {
   const shippingCents  = deliveryType === 'school' ? SCHOOL_FEE_CENTS : (selectedQuote ? Math.round(selectedQuote.rate * 100) : 0);
   const totalCents     = itemPriceCents + shippingCents;
   const isPudoDelivery = deliveryType === 'courier' && (selectedQuote?.method === 'D2L' || selectedQuote?.method === 'L2L');
+  // Group courier/PUDO quotes by whether the buyer collects (locker) or it's delivered to their door
+  const pickupQuotes   = quotes.filter(q => q.method === 'D2L' || q.method === 'L2L');
+  const deliveryQuotes = quotes.filter(q => q.method === 'D2D' || q.method === 'L2D');
 
   const handleConfirmOrder = async () => {
     if (deliveryType === 'courier' && !selectedQuote) return;
@@ -188,11 +216,40 @@ export default function CheckoutScreen() {
       });
       const json = await res.json() as { orderId?: string; error?: string };
       if (!res.ok) { setErrorCode(json.error ?? 'unknown'); setStep('error'); return; }
-      router.replace(`/order/${json.orderId}` as never);
+      router.replace('/(tabs)/orders' as never);
     } catch {
       setErrorCode('unknown'); setStep('error');
     }
   };
+
+  function renderQuoteCard(quote: ShippingQuote) {
+    const isSelected = deliveryType === 'courier' && quote.quoteId === selectedId;
+    const isLocker   = quote.method === 'D2L' || quote.method === 'L2D' || quote.method === 'L2L';
+    return (
+      <TouchableOpacity
+        key={quote.quoteId}
+        style={[styles.quoteCard, isSelected && styles.quoteCardActive]}
+        onPress={() => { setDeliveryType('courier'); setSelectedId(quote.quoteId); }}
+      >
+        <View style={styles.quoteRow}>
+          {isLocker
+            ? <MapPin size={17} strokeWidth={2} color={isSelected ? CRIMSON : '#979797'} />
+            : <Truck  size={17} strokeWidth={2} color={isSelected ? CRIMSON : '#979797'} />
+          }
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.quoteMethod, isSelected && { color: CRIMSON }]}>
+              {METHOD_LABELS[quote.method] ?? quote.method}{' '}
+              <Text style={styles.quoteSub}>({quote.serviceLevelName})</Text>
+            </Text>
+            <Text style={styles.quoteMeta}>
+              Est. {fmtDateRange(quote.estimatedDeliveryFrom, quote.estimatedDeliveryTo)}
+            </Text>
+          </View>
+          <Text style={[styles.quotePrice, isSelected && { color: CRIMSON }]}>{fmtF(quote.rate)}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
   // ── Error state ───────────────────────────────────────────────────────────
 
@@ -295,105 +352,65 @@ export default function CheckoutScreen() {
           </View>
         )}
 
-        {/* School delivery option */}
+        {/* Pick-up options: school pick-up + any PUDO locker quotes */}
+        <Text style={styles.sectionLabel}>Pick-up options</Text>
+
+        {/* School pick-up card */}
         {schoolMatch && (
-          <>
-            <Text style={styles.sectionLabel}>Delivery method</Text>
-
-            {/* School delivery card */}
-            <TouchableOpacity
-              style={[styles.quoteCard, deliveryType === 'school' && styles.quoteCardActive]}
-              onPress={() => setDeliveryType('school')}
-            >
-              <View style={styles.quoteRow}>
-                <School size={17} strokeWidth={2} color={deliveryType === 'school' ? CRIMSON : '#979797'} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.quoteMethod, deliveryType === 'school' && { color: CRIMSON }]}>
-                    School drop-off
-                  </Text>
-                  <Text style={styles.quoteMeta}>Collect from {deliverySchoolName}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  <Text style={[styles.quotePrice, deliveryType === 'school' && { color: CRIMSON }]}>R 20.00</Text>
-                  {deliveryType === 'school' && <CheckCircle2 size={14} strokeWidth={2.5} color={CRIMSON} />}
+          <TouchableOpacity
+            style={[styles.quoteCard, deliveryType === 'school' && styles.quoteCardActive]}
+            onPress={() => setDeliveryType('school')}
+          >
+            <View style={styles.quoteRow}>
+              <School size={17} strokeWidth={2} color={deliveryType === 'school' ? CRIMSON : '#979797'} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.quoteMethod, deliveryType === 'school' && { color: CRIMSON }]}>
+                  School pick-up
+                </Text>
+                <Text style={styles.quoteMeta}>Collect from {deliverySchoolName}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                <Text style={[styles.quotePrice, deliveryType === 'school' && { color: CRIMSON }]}>R 20.00</Text>
+                {deliveryType === 'school' && <CheckCircle2 size={14} strokeWidth={2.5} color={CRIMSON} />}
+              </View>
+            </View>
+            {deliveryType === 'school' && matchingSchools.length > 1 && (
+              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#fecdd3', gap: 6 }}>
+                <Text style={{ color: '#979797', fontSize: 11 }}>Multiple matching schools — pick one:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {matchingSchools.map(s => (
+                    <TouchableOpacity key={s.id}
+                      onPress={() => { setDeliverySchoolId(s.id); setDeliverySchoolName(s.name); }}
+                      style={{
+                        paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1,
+                        backgroundColor: deliverySchoolId === s.id ? CRIMSON : '#fff',
+                        borderColor: deliverySchoolId === s.id ? CRIMSON : BORDER,
+                      }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: deliverySchoolId === s.id ? '#fff' : '#111' }}>
+                        {s.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
-              {deliveryType === 'school' && matchingSchools.length > 1 && (
-                <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#fecdd3', gap: 6 }}>
-                  <Text style={{ color: '#979797', fontSize: 11 }}>Multiple matching schools — pick one:</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    {matchingSchools.map(s => (
-                      <TouchableOpacity key={s.id}
-                        onPress={() => { setDeliverySchoolId(s.id); setDeliverySchoolName(s.name); }}
-                        style={{
-                          paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1,
-                          backgroundColor: deliverySchoolId === s.id ? CRIMSON : '#fff',
-                          borderColor: deliverySchoolId === s.id ? CRIMSON : BORDER,
-                        }}>
-                        <Text style={{ fontSize: 11, fontWeight: '600', color: deliverySchoolId === s.id ? '#fff' : '#111' }}>
-                          {s.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* Courier toggle */}
-            <TouchableOpacity
-              style={[styles.quoteCard, deliveryType === 'courier' && styles.quoteCardActive]}
-              onPress={() => setDeliveryType('courier')}
-            >
-              <View style={styles.quoteRow}>
-                <Truck size={17} strokeWidth={2} color={deliveryType === 'courier' ? CRIMSON : '#979797'} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.quoteMethod, deliveryType === 'courier' && { color: CRIMSON }]}>
-                    Courier delivery
-                  </Text>
-                  <Text style={styles.quoteMeta}>Door-to-door or PUDO locker</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </>
+            )}
+          </TouchableOpacity>
         )}
 
-        {/* Shipping options — courier quotes */}
-        {(deliveryType === 'courier' || !schoolMatch) && (
-        <Text style={styles.sectionLabel}>{schoolMatch ? 'Courier options' : 'Shipping options'}</Text>
+        {/* PUDO locker quotes — buyer collects from a locker (D2L, L2L) */}
+        {pickupQuotes.map(renderQuoteCard)}
+
+        {!schoolMatch && pickupQuotes.length === 0 && (
+          <View style={styles.emptyQuotes}><Text style={styles.emptyQuotesText}>{courierError ?? 'No pick-up options available.'}</Text></View>
         )}
-        {(deliveryType === 'courier' || !schoolMatch) && (quotes.length === 0 ? (
-          <View style={styles.emptyQuotes}><Text style={styles.emptyQuotesText}>No shipping options available.</Text></View>
+
+        {/* Delivery options: door-to-door courier quotes (D2D, L2D) */}
+        <Text style={styles.sectionLabel}>Delivery options</Text>
+        {deliveryQuotes.length === 0 ? (
+          <View style={styles.emptyQuotes}><Text style={styles.emptyQuotesText}>{courierError ?? 'No delivery options available.'}</Text></View>
         ) : (
-          quotes.map(quote => {
-            const isSelected = quote.quoteId === selectedId;
-            const isLocker   = quote.method === 'D2L' || quote.method === 'L2D' || quote.method === 'L2L';
-            return (
-              <TouchableOpacity
-                key={quote.quoteId}
-                style={[styles.quoteCard, isSelected && styles.quoteCardActive]}
-                onPress={() => setSelectedId(quote.quoteId)}
-              >
-                <View style={styles.quoteRow}>
-                  {isLocker
-                    ? <MapPin size={17} strokeWidth={2} color={isSelected ? CRIMSON : '#979797'} />
-                    : <Truck  size={17} strokeWidth={2} color={isSelected ? CRIMSON : '#979797'} />
-                  }
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.quoteMethod, isSelected && { color: CRIMSON }]}>
-                      {METHOD_LABELS[quote.method] ?? quote.method}{' '}
-                      <Text style={styles.quoteSub}>({quote.serviceLevelName})</Text>
-                    </Text>
-                    <Text style={styles.quoteMeta}>
-                      Est. {fmtDateRange(quote.estimatedDeliveryFrom, quote.estimatedDeliveryTo)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.quotePrice, isSelected && { color: CRIMSON }]}>{fmtF(quote.rate)}</Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        ))}
+          deliveryQuotes.map(renderQuoteCard)
+        )}
 
         {/* PUDO locker picker */}
         {isPudoDelivery && buyerSuburb && (
@@ -425,21 +442,23 @@ export default function CheckoutScreen() {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Shipping</Text>
-            <Text style={styles.summaryValue}>{selectedQuote ? fmtF(selectedQuote.rate) : '—'}</Text>
+            <Text style={styles.summaryValue}>
+              {deliveryType === 'school' ? fmt(SCHOOL_FEE_CENTS) : (selectedQuote ? fmtF(selectedQuote.rate) : '—')}
+            </Text>
           </View>
           <View style={[styles.summaryRow, { borderTopWidth: 1, borderTopColor: BORDER, marginTop: 6, paddingTop: 10 }]}>
             <Text style={[styles.summaryLabel, { color: '#111', fontWeight: '700', fontSize: 15 }]}>Total</Text>
             <Text style={[styles.summaryValue, { color: CRIMSON, fontWeight: '800', fontSize: 16 }]}>
-              {selectedQuote ? fmt(totalCents) : '—'}
+              {deliveryType === 'school' || selectedQuote ? fmt(totalCents) : '—'}
             </Text>
           </View>
         </View>
 
         {/* Confirm button */}
         <TouchableOpacity
-          style={[styles.primaryBtn, (!selectedQuote || step === 'placing') && styles.btnDisabled]}
+          style={[styles.primaryBtn, ((deliveryType === 'courier' && !selectedQuote) || step === 'placing') && styles.btnDisabled]}
           onPress={handleConfirmOrder}
-          disabled={!selectedQuote || step === 'placing'}
+          disabled={(deliveryType === 'courier' && !selectedQuote) || step === 'placing'}
         >
           {step === 'placing'
             ? <ActivityIndicator color="#fff" />

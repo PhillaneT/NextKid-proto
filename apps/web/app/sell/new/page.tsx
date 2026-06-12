@@ -76,6 +76,18 @@ export default function NewListingPage() {
     description: '',
   });
 
+  // Step 3 — multi-item listings (bundle of separately-priced items)
+  type ItemDraft = { key: string; name: string; price: string; size_label: string };
+  const [isMultiItem, setIsMultiItem] = useState(false);
+  const [draftItems, setDraftItems] = useState<ItemDraft[]>([
+    { key: crypto.randomUUID(), name: '', price: '', size_label: '' },
+  ]);
+  const addDraftItem    = () => setDraftItems(prev => [...prev, { key: crypto.randomUUID(), name: '', price: '', size_label: '' }]);
+  const removeDraftItem = (key: string) => setDraftItems(prev => prev.filter(i => i.key !== key));
+  const updateDraftItem = (key: string, field: keyof ItemDraft, value: string) =>
+    setDraftItems(prev => prev.map(i => i.key === key ? { ...i, [field]: value } : i));
+  const validItems = draftItems.filter(i => i.name.trim() && parseFloat(i.price) > 0);
+
   // Step 4 — parcel dimensions + shipping methods
   const [parcel, setParcel] = useState({ l: '', w: '', h: '', weight: '' });
   const [shippingMethods, setShippingMethods] = useState<SellerShippingOption[]>([]);
@@ -108,12 +120,11 @@ export default function NewListingPage() {
   // School drop-off only makes sense if this listing is tied to a school
   const hasSchoolContext = selectedSchool !== null || profileSchools.length > 0;
 
-  const toggleShipping = (method: SellerShippingOption) => {
-    setShippingMethods(prev =>
-      prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
-    );
-    // Clear saved locker when PUDO_DROPOFF is turned off
-    if (method === 'PUDO_DROPOFF' && shippingMethods.includes('PUDO_DROPOFF')) {
+  // RULE: sellers choose exactly one shipping method (radio-style, not multi-select)
+  const selectShipping = (method: SellerShippingOption) => {
+    setShippingMethods([method]);
+    // Clear saved locker unless PUDO_DROPOFF is the selected method
+    if (method !== 'PUDO_DROPOFF') {
       setPudoLockerId('');
       setPudoLockerName('');
       setPudoLockerAddress('');
@@ -181,6 +192,10 @@ export default function NewListingPage() {
 
   const handleSubmit = async () => {
     setError('');
+    if (isMultiItem && validItems.length === 0) {
+      setError('Add at least one item with a name and price.');
+      return;
+    }
     if (!parcelComplete || !shippingComplete) {
       setError('Parcel dimensions and at least one shipping method are required.');
       return;
@@ -194,7 +209,10 @@ export default function NewListingPage() {
       .eq('id', user.id).single();
 
     // price_cents stores the BUYER price (gross-up) so listing cards show what the buyer pays.
-    const sellerPayoutRands = parseFloat(form.price);
+    // RULE: for multi-item listings, price_cents reflects the cheapest item ("from R...")
+    const sellerPayoutRands = isMultiItem
+      ? Math.min(...validItems.map(i => parseFloat(i.price)))
+      : parseFloat(form.price);
     const priceCents = calculateBuyerPrice(sellerPayoutRands).buyerPriceCents;
 
     const { data: newListing, error: insertError } = await supabase.from('listings').insert({
@@ -236,12 +254,33 @@ export default function NewListingPage() {
       // RULE: if PUDO_DROPOFF selected, seller's chosen drop-off locker is required and stored here
       pudo_locker_id:       pudoLockerId   || null,
       pudo_locker_name:     pudoLockerName || null,
+
+      // Multi-item listings — see "Multi-Item Listings, Reservations & Order Items"
+      is_multi_item:        isMultiItem,
+      item_count:           isMultiItem ? validItems.length : 1,
+      available_count:      isMultiItem ? validItems.length : 1,
     }).select('id').single();
 
     if (insertError || !newListing) {
       setLoading(false);
       setError('Error: ' + (insertError?.message ?? 'Unknown error'));
       return;
+    }
+
+    if (isMultiItem && validItems.length > 0) {
+      const { error: itemsError } = await supabase.from('listing_items').insert(
+        validItems.map(i => ({
+          listing_id:  newListing.id,
+          name:        i.name.trim(),
+          price_cents: Math.round(parseFloat(i.price) * 100),
+          size_label:  i.size_label.trim() || null,
+        }))
+      );
+      if (itemsError) {
+        setLoading(false);
+        setError('Error: ' + itemsError.message);
+        return;
+      }
     }
 
     setLoading(false);
@@ -421,6 +460,19 @@ export default function NewListingPage() {
           {step === 3 && <>
             <h2 className="text-[#111] font-semibold text-lg mb-4">Item details</h2>
 
+            {/* Multi-item toggle — choose first, before filling anything else */}
+            <div className="bg-[#f4f4f4] border border-[#dedede] rounded-xl p-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[#111] text-sm font-medium">Multiple items in this listing?</p>
+                <p className="text-[#979797] text-xs mt-0.5">e.g. shoes, shirt and pants — each priced separately</p>
+              </div>
+              <button type="button" role="switch" aria-checked={isMultiItem}
+                onClick={() => setIsMultiItem(v => !v)}
+                className={`relative w-12 h-7 rounded-full transition shrink-0 ${isMultiItem ? 'bg-[#BE1E2D]' : 'bg-[#dedede]'}`}>
+                <span className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${isMultiItem ? 'translate-x-5' : ''}`} />
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Subcategory</label>
@@ -455,12 +507,62 @@ export default function NewListingPage() {
               )}
             </div>
 
-            <div>
-              <label className={labelCls}>Your asking price (Rands)</label>
-              <input type="number" className={inputCls} value={form.price}
-                onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" min="10" />
-              {parseFloat(form.price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(form.price)} />}
-            </div>
+            {/* Single item: price + buyer price calculator */}
+            {!isMultiItem && (
+              <div>
+                <label className={labelCls}>Your asking price (Rands)</label>
+                <input type="number" className={inputCls} value={form.price}
+                  onChange={e => setForm({ ...form, price: e.target.value })} placeholder="250" min="10" />
+                {parseFloat(form.price) >= 10 && <BuyerPriceWidget sellerRands={parseFloat(form.price)} />}
+              </div>
+            )}
+
+            {/* Multi-item: per-item list */}
+            {isMultiItem && (
+              <div className="space-y-3">
+                <label className={labelCls}>Items in this listing <span className="text-[#979797] font-normal">(at least 1)</span></label>
+                {draftItems.map((item, idx) => (
+                  <div key={item.key} className="border border-[#dedede] rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[#979797] text-xs font-semibold uppercase tracking-wide">Item {idx + 1}</p>
+                      {draftItems.length > 1 && (
+                        <button type="button" onClick={() => removeDraftItem(item.key)} className="text-[#979797] hover:text-[#BE1E2D] transition">
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                    <div>
+                      <label className={labelCls}>Name</label>
+                      <input className={inputCls} value={item.name}
+                        onChange={e => updateDraftItem(item.key, 'name', e.target.value)}
+                        placeholder="e.g. Grey school trousers" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>Price (Rands)</label>
+                        <input type="number" className={inputCls} value={item.price}
+                          onChange={e => updateDraftItem(item.key, 'price', e.target.value)} placeholder="80" min="10" />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Size <span className="text-[#979797] font-normal">(optional)</span></label>
+                        <input className={inputCls} value={item.size_label}
+                          onChange={e => updateDraftItem(item.key, 'size_label', e.target.value)} placeholder="e.g. Size 32" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <button type="button" onClick={addDraftItem}
+                  className="w-full py-2.5 rounded-xl border border-dashed border-[#BE1E2D] text-[#BE1E2D] text-sm font-medium hover:bg-[#fde8ea] transition">
+                  + Add another item
+                </button>
+                {validItems.length > 0 && (
+                  <div className="bg-[#f4f4f4] rounded-xl px-4 py-2.5 flex items-center justify-between text-sm">
+                    <span className="text-[#979797]">{validItems.length} item{validItems.length !== 1 ? 's' : ''} · from R{Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}</span>
+                    <span className="text-[#BE1E2D] font-semibold">Total R{validItems.reduce((s, i) => s + parseFloat(i.price), 0).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <label className={labelCls}>Description <span className="text-[#979797] font-normal">(optional)</span></label>
@@ -473,7 +575,7 @@ export default function NewListingPage() {
             <div className="flex gap-3">
               <button onClick={prevStep} className="flex-1 py-3 rounded-full border border-[#dedede] text-[#979797] hover:bg-[#f4f4f4] transition">← Back</button>
               <button onClick={nextStep}
-                disabled={!form.price}
+                disabled={isMultiItem ? validItems.length === 0 : !form.price}
                 className="flex-grow py-3 rounded-full bg-[#BE1E2D] disabled:bg-[#dedede] disabled:text-[#979797] text-white font-semibold transition">
                 Continue →
               </button>
@@ -524,10 +626,10 @@ export default function NewListingPage() {
               )}
 
               {/* Shipping methods */}
-              <p className="text-[#111] text-sm font-medium mb-3">Shipping methods <span className="text-[#979797] font-normal">(select at least one)</span></p>
+              <p className="text-[#111] text-sm font-medium mb-3">Shipping method <span className="text-[#979797] font-normal">(select one)</span></p>
               <div className="space-y-3">
                 {/* Door-to-Door — always available */}
-                <button type="button" onClick={() => toggleShipping('PICKUP')}
+                <button type="button" onClick={() => selectShipping('PICKUP')}
                   className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
                     shippingMethods.includes('PICKUP')
                       ? 'border-[#BE1E2D] bg-[#fde8ea]'
@@ -543,7 +645,7 @@ export default function NewListingPage() {
 
                 {/* PUDO Locker — only shown if parcel fits */}
                 <button type="button"
-                  onClick={() => fitsInLocker && toggleShipping('PUDO_DROPOFF')}
+                  onClick={() => fitsInLocker && selectShipping('PUDO_DROPOFF')}
                   disabled={parcelComplete && !fitsInLocker}
                   className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
                     shippingMethods.includes('PUDO_DROPOFF')
@@ -594,7 +696,7 @@ export default function NewListingPage() {
 
                 {/* School drop-off — only shown if this listing is tied to a school */}
                 {hasSchoolContext && (
-                  <button type="button" onClick={() => toggleShipping('SCHOOL_DROPOFF')}
+                  <button type="button" onClick={() => selectShipping('SCHOOL_DROPOFF')}
                     className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
                       shippingMethods.includes('SCHOOL_DROPOFF')
                         ? 'border-[#BE1E2D] bg-[#fde8ea]'
@@ -654,8 +756,11 @@ export default function NewListingPage() {
               <p className="text-[#979797]">Category: <span className="text-[#111] font-medium">{category}</span></p>
               {selectedSchool && <p className="text-[#979797]">School: <span className="text-[#111] font-medium">{selectedSchool.name}</span></p>}
               <p className="text-[#979797]">Listing title: <span className="text-[#111] font-medium">{buildListingTitle(category, form.subcategory, form.size)}</span></p>
-              <p className="text-[#979797]">Price: <span className="text-[#BE1E2D] font-bold">R{form.price}</span></p>
-              {form.size && <p className="text-[#979797]">Size: <span className="text-[#111] font-medium">{form.size}</span></p>}
+              {isMultiItem
+                ? <p className="text-[#979797]">Items: <span className="text-[#BE1E2D] font-bold">{validItems.length} items · from R{Math.min(...validItems.map(i => parseFloat(i.price))).toFixed(2)}</span></p>
+                : <p className="text-[#979797]">Price: <span className="text-[#BE1E2D] font-bold">R{form.price}</span></p>
+              }
+              {!isMultiItem && form.size && <p className="text-[#979797]">Size: <span className="text-[#111] font-medium">{form.size}</span></p>}
               <p className="text-[#979797]">Parcel: <span className="text-[#111] font-medium">{parcel.l}×{parcel.w}×{parcel.h} cm · {parcel.weight} kg</span></p>
               <p className="text-[#979797]">Shipping: <span className="text-[#111] font-medium">{shippingMethods.join(', ')}</span></p>
             </div>
@@ -678,56 +783,19 @@ export default function NewListingPage() {
 }
 
 // ── Buyer Price Widget ─────────────────────────────────────────────────────────
-
+// RULE: sellers only see the final totals — never the fee/markup breakdown
 function BuyerPriceWidget({ sellerRands }: { sellerRands: number }) {
   const b = calculateBuyerPrice(sellerRands)
 
   return (
-    <div className="mt-3 rounded-2xl border border-[#dedede] bg-[#fafafa] overflow-hidden text-xs">
-      <div className="px-4 py-2.5 border-b border-[#dedede] bg-white flex items-center justify-between">
-        <p className="font-semibold text-[#979797] uppercase tracking-wide">What the buyer pays</p>
-        <p className="text-[#979797]">Gross-up formula</p>
+    <div className="mt-3 bg-[#BE1E2D] rounded-xl px-4 py-3 flex items-center justify-between">
+      <div>
+        <p className="text-white/70 text-[10px] uppercase tracking-wide">Buyer pays</p>
+        <p className="text-white text-lg font-bold">{fmtRands(b.buyerPriceCents)}</p>
       </div>
-      <div className="px-4 py-3 space-y-1.5">
-        <Row step="1" label="Your guaranteed payout"       value={fmtRands(b.sellerPayoutCents)} />
-        <Row step="2" label="+ School delivery fee"        value={fmtRands(b.subtotalCents)}      sub={`+ ${fmtRands(b.deliveryFeeCents)}`} />
-        <Row step="3" label="÷ (1 − 7.5%) NextKid markup" value={fmtRands(b.afterMarkupCents)}   sub={`+ ${fmtRands(b.platformFeeCents)}`} muted />
-        <Row step="4" label="÷ (1 − 2.5%) Stitch fee"     value={fmtRands(b.buyerRawCents)}      sub={`+ ${fmtRands(b.gatewayFeeCents)}`}  muted />
-        <div className="border-t border-[#dedede] pt-2 mt-1 space-y-1.5">
-          <Row step="5" label="Round UP to nearest R25"   value={fmtRands(b.buyerPriceCents)} highlight />
-          <Row step="6" label="Admin fee (rounding surplus)" value={fmtRands(b.adminFeeCents)} muted />
-        </div>
-      </div>
-      <div className="px-4 pb-3">
-        <div className="bg-[#BE1E2D] rounded-xl px-4 py-3 flex items-center justify-between">
-          <div>
-            <p className="text-white/70 text-[10px] uppercase tracking-wide">Buyer pays</p>
-            <p className="text-white text-lg font-bold">{fmtRands(b.buyerPriceCents)}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-white/70 text-[10px] uppercase tracking-wide">You receive</p>
-            <p className="text-white text-base font-semibold">{fmtRands(b.sellerPayoutCents)}</p>
-          </div>
-        </div>
-        <p className="text-[#979797] text-center mt-2 text-[10px]">
-          7.5% markup is for testing only — will be updated before going live
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function Row({ step, label, value, sub, muted, highlight }: {
-  step: string; label: string; value: string
-  sub?: string; muted?: boolean; highlight?: boolean
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-5 h-5 rounded-full bg-[#dedede] text-[#555] font-bold text-[9px] flex items-center justify-center shrink-0">{step}</span>
-      <span className={`flex-1 ${muted ? 'text-[#979797]' : 'text-[#555]'}`}>{label}</span>
       <div className="text-right">
-        <span className={`font-semibold ${highlight ? 'text-[#BE1E2D]' : muted ? 'text-[#979797]' : 'text-[#111]'}`}>{value}</span>
-        {sub && <span className="ml-1.5 text-[#979797]">({sub})</span>}
+        <p className="text-white/70 text-[10px] uppercase tracking-wide">You receive</p>
+        <p className="text-white text-base font-semibold">{fmtRands(b.sellerPayoutCents)}</p>
       </div>
     </div>
   )

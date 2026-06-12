@@ -137,11 +137,10 @@ export default function ItemPage() {
   const editLockerSize    = editParcelDims ? getLockerSizeForParcel(editParcelDims) : null;
   const editFitsInLocker  = editParcelDims ? canFitInLocker(editParcelDims) : false;
 
-  const toggleEditShipping = (method: SellerShippingOption) => {
-    setEditShippingMethods(prev =>
-      prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
-    );
-    if (method === 'PUDO_DROPOFF' && editShippingMethods.includes('PUDO_DROPOFF')) {
+  // RULE: sellers choose exactly one shipping method (radio-style, not multi-select)
+  const selectEditShipping = (method: SellerShippingOption) => {
+    setEditShippingMethods([method]);
+    if (method !== 'PUDO_DROPOFF') {
       setEditPudoLockerId(''); setEditPudoLockerName(''); setEditPudoLockerAddress('');
     }
   };
@@ -1094,7 +1093,7 @@ export default function ItemPage() {
 
             {/* Shipping methods */}
             <div>
-              <p className="text-sm font-medium text-[#111] mb-1">Shipping methods <span className="text-[#979797] font-normal">(select at least one)</span></p>
+              <p className="text-sm font-medium text-[#111] mb-1">Shipping method <span className="text-[#979797] font-normal">(select one)</span></p>
               {!editParcelDims && (
                 <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
                   Fill in the parcel dimensions above first — PUDO Locker availability depends on the size.
@@ -1106,10 +1105,10 @@ export default function ItemPage() {
                 </p>
               )}
               {editParcelDims && editFitsInLocker && !editShippingMethods.length && (
-                <p className="text-xs text-[#979797] mb-3">Select at least one method below.</p>
+                <p className="text-xs text-[#979797] mb-3">Select a shipping method below.</p>
               )}
               <div className="space-y-3">
-                <button type="button" onClick={() => toggleEditShipping('PICKUP')}
+                <button type="button" onClick={() => selectEditShipping('PICKUP')}
                   className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
                     editShippingMethods.includes('PICKUP')
                       ? 'border-[#BE1E2D] bg-[#fde8ea]'
@@ -1124,7 +1123,7 @@ export default function ItemPage() {
                 </button>
 
                 <button type="button"
-                  onClick={() => editFitsInLocker && toggleEditShipping('PUDO_DROPOFF')}
+                  onClick={() => editFitsInLocker && selectEditShipping('PUDO_DROPOFF')}
                   disabled={!!editParcelDims && !editFitsInLocker}
                   className={`w-full p-4 rounded-xl border-2 text-left flex items-start gap-4 transition ${
                     editShippingMethods.includes('PUDO_DROPOFF')

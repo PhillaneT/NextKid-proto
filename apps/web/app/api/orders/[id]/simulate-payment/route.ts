@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { generateWaybillNumber, generateQrToken, DROPOFF_TTL_HOURS } from '@/lib/qr'
+import { sendOrderNotification } from '@/lib/notifications'
 
 // POST /api/orders/:id/simulate-payment
 // DEV/TEST ONLY — simulates a successful Stitch payment without real money.
@@ -88,6 +89,9 @@ export async function POST(
       created_by:  user.id,
     },
   ])
+
+  sendOrderNotification({ orderId, newStatus: 'AWAITING_DROPOFF', triggeredBy: 'buyer' })
+    .catch(err => console.error('[SimulatePayment] notification error:', err))
 
   console.log(`[SimulatePayment] ✅ Order ${orderId.slice(0, 8)} → AWAITING_DROPOFF | ${waybillNumber}`)
   return NextResponse.json({ ok: true, waybillNumber })

@@ -388,15 +388,15 @@ NextKid uses a **reverse "gross-up" pricing model** — the seller names the pay
 
 ```
 Step 1: seller_price                        (guaranteed seller payout)
-Step 2: + delivery_fee (R20)                (fixed school delivery fee)
-Step 3: ÷ (1 - platformRate)                (gross up for NextKid commission, currently 7.5%)
-Step 4: ÷ (1 - gatewayRate)                 (gross up for Stitch fee, 2.5%)
-Step 5: CEILING(raw ÷ R25) × R25            (round UP to nearest R25)
-Step 6: admin_fee = buyer_price - buyer_raw (rounding surplus → Praesignis Finance)
+Step 2: ÷ (1 - platformRate)                (gross up for NextKid commission, currently 7.5%)
+Step 3: ÷ (1 - gatewayRate)                 (gross up for Stitch fee, 2.5%)
+Step 4: CEILING(raw ÷ R25) × R25            (round UP to nearest R25)
+Step 5: admin_fee = buyer_price - buyer_raw (rounding surplus → Praesignis Finance)
 ```
 
-`DEFAULT_PRICING = { deliveryFeeRands: 20, platformRate: 0.075, gatewayRate: 0.025, roundTo: 25 }`
+`DEFAULT_PRICING = { platformRate: 0.075, gatewayRate: 0.025, roundTo: 25 }`
 
+- Delivery cost is **not** part of this calculator — the buyer chooses a delivery method (school pick-up, courier, etc.) at checkout and pays that separately, on top of the buyer price computed here
 - `platformRate` mirrors `PLATFORM_COMMISSION_RATE` (7.5%, testing — update before going live)
 - All money handled internally in **cents** to avoid floating point errors; `fmtRands()` formats for display
 - Used by both web (`apps/web/app/sell/new/page.tsx`) and mobile (`apps/mobile/app/(tabs)/sell.tsx`) sell flows to show the seller their predicted buyer price live as they type
